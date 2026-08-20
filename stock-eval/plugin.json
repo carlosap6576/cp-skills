@@ -1,0 +1,21 @@
+{
+  "name": "stock-eval",
+  "version": "1.0.0",
+  "description": "Evaluate a stock or company by what people are actually saying right now across Reddit, X, YouTube, TikTok, Hacker News, Polymarket, GitHub, and the web, ranked by real engagement over the last 30 days.",
+  "license": "Proprietary - All Rights Reserved (see LICENSE)",
+  "keywords": [
+    "stocks",
+    "equities",
+    "finance",
+    "sentiment",
+    "ticker",
+    "research",
+    "reddit",
+    "twitter",
+    "youtube",
+    "tiktok",
+    "hackernews",
+    "polymarket",
+    "bluesky"
+  ]
+}

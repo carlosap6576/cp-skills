@@ -1,0 +1,8 @@
+interface:
+  display_name: "Stock Eval"
+  short_description: "Evaluate a stock or company by what people are actually saying across Reddit, X, YouTube, and the web over the last 30 days. Returns a synthesized, citation-backed read on sentiment."
+  default_prompt: "Evaluate this stock or company from the last 30 days across Reddit, X, YouTube, and web. Synthesize what investors are actually saying, upvoting, and sharing right now."
+  brand_color: "#1FA463"
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,8 @@
+interface:
+  display_name: "Code Execute"
+  short_description: "Execute an implementation plan from a .md file path. Validates the plan is stepped, runs it step-by-step from the plan's repo root, never edits the plan, never runs git."
+  default_prompt: "Take the plan file from -p/--path when given. Without -p, auto-discover strictly: exactly one .md in the repo root's .plan folder → execute it; folder missing, empty, or holding several plans → stop and tell the user to pass -p (never prompt, never guess). Execute the plan step by step exactly as written, from the repo root containing the plan; never modify the plan file, never run git. On success, recommend /code-validation on the same plan (advisory), or chain the skill named by --skill=<skill> (e.g. --skill=validate)."
+  brand_color: "#3B6EA5"
+
+policy:
+  allow_implicit_invocation: false

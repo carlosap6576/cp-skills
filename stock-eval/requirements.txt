@@ -1,0 +1,24 @@
+# stock-eval — runtime requirements
+#
+# Core engine: Python 3.12+ standard library ONLY. There are NO pip
+# dependencies required to run the default sources (Reddit, Hacker News,
+# Polymarket). `pip install -r requirements.txt` is a no-op for the core path
+# and is provided only so tooling that expects the file does not fail.
+#
+# (intentionally empty — the engine is stdlib-only)
+
+# ---------------------------------------------------------------------------
+# OPTIONAL source upgrades (install only the ones you want):
+#
+#   External CLIs (auto-detected on PATH, install via your OS package manager):
+#     gh        -> GitHub source (https://cli.github.com)
+#     yt-dlp    -> YouTube search + transcripts (pip install yt-dlp)
+#
+#   Optional API keys (set in ~/.config/stock-eval/.env, then `chmod 600`):
+#     SCRAPECREATORS_API_KEY      -> TikTok, Instagram, Reddit fallback
+#     AUTH_TOKEN + CT0            -> X / Twitter search (browser tokens)
+#     XAI_API_KEY                 -> X / Twitter via xAI
+#     BSKY_HANDLE + BSKY_APP_PASSWORD -> Bluesky
+#     BRAVE_API_KEY / EXA_API_KEY / SERPER_API_KEY -> headless web resolution
+#       (not needed when the host agent provides a WebSearch tool)
+# ---------------------------------------------------------------------------

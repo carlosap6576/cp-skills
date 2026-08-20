@@ -1,0 +1,13 @@
+{
+  "name": "code-validation",
+  "version": "1.6.0",
+  "description": "Validate a completed implementation against its plan. -p/--path points at the plan .md the implementation was built from; when omitted, auto-discovery looks in the .plan folder at the repo root — exactly one plan there is validated with ZERO prompts, and only ambiguity (missing folder, no plans, or 2+ plans) asks for the path. Audits the implementation item-by-item and autonomously FIXES every issue found (code edits allowed; the plan file is never edited during validation). Creating tests/mocks/stubs to prove the work is encouraged, but they are proof, not payload: a mandatory production-cleanup sweep DELETES every generated test/mock/stub file after verification is green (pre-existing tests and plan-named test deliverables survive), polishes every touched file to a zero-comment production standard (no debug statements, no comments or AI notes on authored lines, no unused imports/dependencies — only functional directives and user-facing CLI/interface output survive), and passes a repo hygiene gate (.gitignore covers .plan/ and knowledge files; nothing lifecycle-generated is in the git flow), re-verified after the sweep. After a fully successful run, the plan file itself is DELETED as the close-out, and the run's final line states the deletion plus a same-session continuation note (any follow-up concerns keep going right here). Never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=review runs gstack's pre-landing /review) after the audit completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists + force flags, /qa, /cso, /design-review, /devex-review, /ship, …).",
+  "license": "Proprietary - All Rights Reserved (see LICENSE)",
+  "keywords": [
+    "validation",
+    "audit",
+    "remediation",
+    "agent-skill",
+    "code-validation"
+  ]
+}

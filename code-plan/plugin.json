@@ -1,0 +1,14 @@
+{
+  "name": "code-plan",
+  "version": "1.12.0",
+  "description": "Turn a rough request into a precise, step-by-step implementation plan. One-shot: --desc/-d alone runs with zero prompts \u2014 the plan saves to a git-ignored .plan/ folder at the repo root (auto-created, .gitignore validated/updated every run); --path/-p overrides the destination. Auto-selects gstack expert lenses (eng/design/security/qa/\u2026) to sharpen the plan; --skill=<skill> chains a follow-up skill on the finished plan. Debug tag defaults to ui-data (never prompted). Rewrites the instructions natively (in the model running the skill \u2014 no external LLM); writes a detailed, human-executable .md plan another agent can execute.",
+  "license": "Proprietary - All Rights Reserved (see LICENSE)",
+  "keywords": [
+    "planning",
+    "implementation-plan",
+    "prompt-template",
+    "agent-skill",
+    "code-plan",
+    "spec"
+  ]
+}

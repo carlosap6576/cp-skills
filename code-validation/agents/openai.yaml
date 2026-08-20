@@ -1,0 +1,8 @@
+interface:
+  display_name: "Code Validation"
+  short_description: "Validate a completed implementation against its plan .md, autonomously fixing every issue found. Never edits the plan during validation, never runs git; a successful run deletes the plan file as its close-out and announces it on the final line."
+  default_prompt: "Take the plan file from -p/--path when given; when omitted, auto-discover the single plan in <repo-root>/.plan and run it with zero prompts, asking only when discovery is ambiguous (missing folder, no plans, or 2+ plans). Audit the implementation against the plan item-by-item, fix everything found without handing problems back, then sweep every touched file production-clean (no debug statements, dev comments, or unused imports/dependencies) and re-verify; never modify the plan file during validation, never run git. On success, recommend gstack's /review on the validated diff (advisory), or chain the skill named by --skill=<skill> (e.g. --skill=review). Then close out by RUNNING `scripts/code_validation.py close-out --plan <PLAN_ABS>`, which deletes the plan file and prints the PLAN DELETED line; relay that stdout verbatim as your final line and never compose that line yourself — if the command printed nothing, no deletion happened and you must not claim one. A failed audit keeps the plan for the re-run."
+  brand_color: "#2E8B57"
+
+policy:
+  allow_implicit_invocation: false

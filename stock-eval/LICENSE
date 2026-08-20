@@ -1,0 +1,144 @@
+CP-SKILLS PROPRIETARY LICENSE
+
+Copyright (c) 2026 Carlos Perez. All Rights Reserved.
+
+This software, including all source code, skill contracts (SKILL.md files),
+prompts, scripts, documentation, and generated outputs (collectively, the
+"Software"), is the proprietary property of Carlos Perez (the "Licensor").
+The Software is NOT open source and is NOT free software.
+
+BY ACCESSING, VIEWING, DOWNLOADING, INSTALLING, OR USING THE SOFTWARE IN ANY
+WAY, YOU AGREE TO BE BOUND BY ALL TERMS OF THIS LICENSE. IF YOU DO NOT AGREE,
+YOU MUST NOT ACCESS OR USE THE SOFTWARE AND MUST DELETE ALL COPIES IN YOUR
+POSSESSION.
+
+1. OWNERSHIP
+
+   All right, title, and interest in and to the Software, including all
+   intellectual property rights, remain exclusively with the Licensor.
+   Nothing in this license transfers any ownership right to you.
+
+2. LIMITED EVALUATION GRANT
+
+   The Licensor grants you a personal, non-exclusive, non-transferable,
+   non-sublicensable, revocable, royalty-bearing-if-commercial license
+   solely to view and evaluate the Software on your own devices for
+   personal, non-commercial evaluation purposes. NO OTHER RIGHTS ARE
+   GRANTED, WHETHER EXPRESSLY, BY IMPLICATION, ESTOPPEL, OR OTHERWISE.
+
+3. PROHIBITED USES — WRITTEN PERMISSION REQUIRED
+
+   Except as expressly allowed in Section 2, you may NOT, without the prior
+   written permission of the Licensor:
+
+   a. copy, reproduce, or redistribute the Software or any portion of it;
+   b. modify, adapt, translate, or create derivative works of the Software;
+   c. merge, publish, sublicense, sell, rent, lease, or lend the Software;
+   d. host the Software or offer it (or any service built on it) to third
+      parties, whether free or paid, including as a hosted or SaaS offering;
+   e. incorporate the Software or any portion of it into any product,
+      service, plugin, marketplace listing, or distribution channel;
+   f. use the Software or its outputs to train, fine-tune, or evaluate any
+      machine-learning or AI model or dataset;
+   g. remove, alter, or obscure any copyright, license, or disclaimer
+      notice contained in the Software;
+   h. use the Software for any commercial purpose whatsoever.
+
+4. COMMERCIAL USE, ROYALTIES, AND FEES
+
+   ANY commercial use of the Software — including internal business use,
+   resale, hosting, consulting deliverables, or bundling into commercial
+   products — requires a separate written license agreement with the
+   Licensor, which will include royalty and/or fee terms set by the
+   Licensor at the Licensor's sole discretion. To request permission or
+   negotiate a commercial/royalty license, contact the Licensor via GitHub:
+
+       Open an issue at https://github.com/carlosap6576/cp-skills/issues
+       (or message the profile at https://github.com/carlosap6576)
+
+   Any commercial use undertaken without such a written agreement is
+   unlicensed, constitutes willful infringement, and obligates you to pay
+   the Licensor's then-standard royalty for such use in addition to any
+   other remedies available at law or in equity.
+
+5. NO FINANCIAL ADVICE — READ CAREFULLY
+
+   THE LICENSOR IS NOT A FINANCIAL ADVISOR, INVESTMENT ADVISER,
+   BROKER-DEALER, ACCOUNTANT, OR TAX PROFESSIONAL, AND IS NOT REGISTERED
+   WITH THE SEC, FINRA, OR ANY OTHER REGULATORY BODY.
+
+   THE SOFTWARE — INCLUDING, WITHOUT LIMITATION, THE "stock-eval" SKILL AND
+   ANY REPORT, SCORE, SENTIMENT READING, SIGNAL, RANKING, OR OTHER OUTPUT IT
+   PRODUCES — IS AN EXPERIMENTAL RESEARCH PROTOTYPE PROVIDED FOR
+   INFORMATIONAL AND EDUCATIONAL PURPOSES ONLY. IT IS NOT INVESTMENT ADVICE,
+   NOT A RECOMMENDATION TO BUY, HOLD, OR SELL ANY SECURITY OR OTHER ASSET,
+   AND NOT AN OFFER OR SOLICITATION OF ANY KIND.
+
+   OUTPUTS MAY BE INCOMPLETE, DELAYED, INACCURATE, OUT OF DATE, OR SIMPLY
+   WRONG. DO NOT MAKE INVESTMENT DECISIONS BASED ON THE SOFTWARE. ALWAYS
+   CONSULT A LICENSED FINANCIAL PROFESSIONAL BEFORE MAKING ANY INVESTMENT
+   DECISION. ANY INVESTMENT OR TRADING DECISION YOU MAKE IS YOURS ALONE AND
+   ENTIRELY AT YOUR OWN RISK. THE LICENSOR ACCEPTS NO RESPONSIBILITY
+   WHATSOEVER FOR YOUR INVESTMENTS, TRADES, OR ANY FINANCIAL LOSSES OF ANY
+   KIND, HOWEVER ARISING.
+
+6. PROTOTYPE STATUS
+
+   The Software is a prototype under active development. It is provided for
+   experimentation only, is not warranted to be production-ready, and may
+   be changed, broken, or withdrawn at any time without notice.
+
+7. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF
+   ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+   WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE,
+   ACCURACY, AND NONINFRINGEMENT. THE LICENSOR DOES NOT WARRANT THAT THE
+   SOFTWARE WILL BE ERROR-FREE, SECURE, OR UNINTERRUPTED, OR THAT ITS
+   OUTPUTS WILL BE ACCURATE OR RELIABLE.
+
+8. LIMITATION OF LIABILITY
+
+   TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+   LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY — WHETHER
+   IN AN ACTION OF CONTRACT, TORT, STRICT LIABILITY, OR OTHERWISE —
+   INCLUDING, WITHOUT LIMITATION, ANY DIRECT, INDIRECT, INCIDENTAL,
+   SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, LOST PROFITS,
+   LOST SAVINGS, TRADING OR INVESTMENT LOSSES, LOSS OF DATA, OR BUSINESS
+   INTERRUPTION, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE
+   OR THE USE OF OR INABILITY TO USE THE SOFTWARE, EVEN IF ADVISED OF THE
+   POSSIBILITY OF SUCH DAMAGES. YOUR SOLE AND EXCLUSIVE REMEDY IS TO STOP
+   USING THE SOFTWARE.
+
+9. INDEMNIFICATION
+
+   You agree to indemnify, defend, and hold harmless the Licensor from and
+   against any and all claims, liabilities, damages, losses, and expenses
+   (including reasonable attorneys' fees) arising out of or related to your
+   use of the Software, your violation of this license, or any investment
+   or trading activity you undertake.
+
+10. TERMINATION
+
+    This license terminates automatically and immediately, without notice,
+    upon any breach of its terms. Upon termination you must cease all use
+    of the Software and destroy all copies in your possession or control.
+    Sections 1, 4, 5, 7, 8, 9, and 11 survive termination.
+
+11. RESERVATION OF RIGHTS; MISCELLANEOUS
+
+    All rights not expressly granted in this license are reserved by the
+    Licensor. Failure to enforce any provision is not a waiver. If any
+    provision is held unenforceable, the remainder stays in full effect.
+    This license is the entire agreement between you and the Licensor
+    concerning the Software and supersedes any prior license (including any
+    previously published MIT license text) with respect to versions of the
+    Software distributed with this license.
+
+12. THIRD-PARTY COMPONENTS
+
+    Portions of the Software may include or derive from third-party
+    components distributed under their own licenses. Such components remain
+    governed by their original licenses and notices, which are preserved
+    where required; this license applies to the Licensor's original work
+    and modifications.

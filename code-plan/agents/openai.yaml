@@ -1,0 +1,8 @@
+interface:
+  display_name: "Code Plan"
+  short_description: "Turn a rough request into a precise, step-by-step implementation plan. Rewrites your instructions natively (no external LLM), then writes a detailed .md plan another agent can execute."
+  default_prompt: "Take my instructions from -d/--desc (ask only if missing). The save folder comes from -p/--path when given; otherwise default to a git-ignored .plan folder at the repo root (create it and ensure .gitignore covers it — never ask). The debug tag defaults to ui-data — never ask for it. Auto-select up to 3 expert lenses that fit the task before planning (never prompt about it). Rewrite the instructions clearly, then produce a detailed, human-executable step-by-step implementation plan as a markdown file with an Experts & Tooling section. If --skill=<skill> was given, invoke that skill on the finished plan afterwards."
+  brand_color: "#3B6EA5"
+
+policy:
+  allow_implicit_invocation: false
