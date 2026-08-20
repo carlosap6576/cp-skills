@@ -1,0 +1,32 @@
+# --- Claude / agent workspace files (never public) ---
+.plan/
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+*.session.json
+
+# --- Secrets & local config ---
+.env
+.env.*
+*.pem
+*.key
+*credentials*
+*.secret
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- Generated skill output (personal artifacts) ---
+stock-eval/outputs/*
+!stock-eval/outputs/.gitkeep
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
