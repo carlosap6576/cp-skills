@@ -292,6 +292,138 @@ class DefaultPlanTests(unittest.TestCase):
                          (root / ".plan").resolve())
 
 
+class SignalTests(unittest.TestCase):
+    """Pipeline stage signal (v1.4.0): one atomic JSON file per stage under
+    <repo-root>/.plan/.signals/, so external automation can drive the
+    plan → execute → validate pipeline without parsing chat."""
+
+    STAGE = "execute"
+    SKILL = "code-execute"
+
+    def _run(self, argv, build=None, cwd_rel="."):
+        """Run `signal` inside a temp repo; return (captured, {name: json})
+        for every file left in .plan/.signals/."""
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            if build:
+                build(root)
+            prev = os.getcwd()
+            os.chdir(root / cwd_rel)
+            try:
+                cap = io_capture(code_execute.main, argv)
+            finally:
+                os.chdir(prev)
+            files = {}
+            sig_dir = root / ".plan" / ".signals"
+            if sig_dir.is_dir():
+                for f in sorted(sig_dir.iterdir()):
+                    if f.name.endswith(".json"):
+                        files[f.name] = json.loads(f.read_text(encoding="utf-8"))
+                    else:
+                        files[f.name] = None  # a leftover .tmp is a bug
+            return cap, files
+
+    def test_success_signal_has_the_full_schema(self):
+        def build(root):
+            (root / "a-plan.md").write_text("### Step\n", encoding="utf-8")
+        cap, files = self._run(
+            ["signal", "--status", "success", "--plan", "a-plan.md",
+             "--detail", "IMPLEMENTATION COMPLETE — all 3 steps executed and verified."],
+            build=build)
+        self.assertEqual(cap.code, 0, cap.stderr)
+        name = f"a-plan.{self.STAGE}.json"
+        self.assertEqual(list(files), [name])
+        sig = files[name]
+        self.assertEqual(sig["schema"], 1)
+        self.assertEqual(sig["skill"], self.SKILL)
+        self.assertEqual(sig["stage"], self.STAGE)
+        self.assertEqual(sig["status"], "success")
+        self.assertTrue(os.path.isabs(sig["plan"]))
+        self.assertTrue(sig["plan"].endswith("a-plan.md"))
+        self.assertIn("IMPLEMENTATION COMPLETE", sig["detail"])
+        self.assertTrue(sig["written_at"])
+        # The signal path is printed for the harness, and no .tmp remains.
+        self.assertTrue(cap.stdout.strip().endswith(name))
+
+    def test_failed_signal_without_plan_uses_pipeline_stem(self):
+        cap, files = self._run(
+            ["signal", "--status", "failed", "--detail", "plan-check rejected"])
+        self.assertEqual(cap.code, 0, cap.stderr)
+        name = f"pipeline.{self.STAGE}.json"
+        self.assertEqual(list(files), [name])
+        self.assertEqual(files[name]["status"], "failed")
+        self.assertEqual(files[name]["plan"], "")
+
+    def test_rerun_overwrites_atomically(self):
+        """Last write wins; the .tmp intermediate never survives."""
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            (root / "p-plan.md").write_text("### Step\n", encoding="utf-8")
+            prev = os.getcwd()
+            os.chdir(root)
+            try:
+                first = io_capture(code_execute.main, [
+                    "signal", "--status", "failed", "--plan", "p-plan.md"])
+                second = io_capture(code_execute.main, [
+                    "signal", "--status", "success", "--plan", "p-plan.md"])
+            finally:
+                os.chdir(prev)
+            self.assertEqual(first.code, 0, first.stderr)
+            self.assertEqual(second.code, 0, second.stderr)
+            sig_dir = root / ".plan" / ".signals"
+            names = sorted(f.name for f in sig_dir.iterdir())
+            self.assertEqual(names, [f"p-plan.{self.STAGE}.json"])
+            sig = json.loads((sig_dir / names[0]).read_text(encoding="utf-8"))
+            self.assertEqual(sig["status"], "success")
+
+    def test_signal_resolves_repo_root_from_subdir(self):
+        def build(root):
+            (root / "src").mkdir()
+        cap, files = self._run(
+            ["signal", "--status", "failed"], build=build, cwd_rel="src")
+        self.assertEqual(cap.code, 0, cap.stderr)
+        # Landed at the repo ROOT's .plan/.signals even though cwd was src/.
+        self.assertEqual(list(files), [f"pipeline.{self.STAGE}.json"])
+
+    def test_invalid_status_is_rejected(self):
+        cap, files = self._run(["signal", "--status", "done"])
+        self.assertEqual(cap.code, 2)
+        self.assertEqual(files, {})
+
+    def test_signals_dir_never_counts_as_a_plan(self):
+        """default-plan must keep resolving the single *.md even with a
+        .signals directory (and its JSON) sitting inside .plan/."""
+        def build(root):
+            d = root / ".plan"
+            d.mkdir()
+            (d / "only-plan.md").write_text("### Step\n", encoding="utf-8")
+        cap, _ = self._run(
+            ["signal", "--status", "success", "--plan", ".plan/only-plan.md"],
+            build=build)
+        self.assertEqual(cap.code, 0, cap.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            d = root / ".plan"
+            d.mkdir()
+            (d / "only-plan.md").write_text("### Step\n", encoding="utf-8")
+            (d / ".signals").mkdir()
+            (d / ".signals" / f"only-plan.{self.STAGE}.json").write_text(
+                "{}", encoding="utf-8")
+            prev = os.getcwd()
+            os.chdir(root)
+            try:
+                out = io_capture(code_execute.main, ["default-plan"])
+            finally:
+                os.chdir(prev)
+            self.assertEqual(out.code, 0, out.stderr)
+            self.assertTrue(out.stdout.strip().endswith("only-plan.md"))
+
+
 class DocsContractTests(unittest.TestCase):
     """Pins the expert-awareness contract added in v1.3.0: the gstack expert
     roster ships with the skill, carries a verifiable gstack version pin

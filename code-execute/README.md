@@ -39,4 +39,32 @@ Manual install (any runtime):
 ln -s "$PWD" ~/.claude/skills/code-execute
 ```
 
+## Pipeline signal (for automation)
+
+Every run ends by atomically writing one machine-readable JSON file to
+`<repo-root>/.plan/.signals/<plan-stem>.execute.json` (stem `pipeline` when
+the run stopped before a plan path was resolved). External orchestrators
+drive the plan → execute → validate lifecycle by polling this git-ignored
+directory — no chat parsing:
+
+```json
+{
+  "schema": 1,
+  "skill": "code-execute",
+  "stage": "execute",
+  "status": "success",
+  "plan": "/abs/path/.plan/2026-08-26-add-export-plan.md",
+  "detail": "IMPLEMENTATION COMPLETE — all 9 steps executed and verified.",
+  "written_at": "2026-08-26T18:00:00+00:00"
+}
+```
+
+`status` is `success` only when execution ended with the
+`IMPLEMENTATION COMPLETE` report; every failed, partial, or stopped run
+signals `failed` with the reason in `detail`. On success the orchestrator's
+next stage is `/code-validation -p <plan>`. The sibling skills write
+`<plan-stem>.plan.json` and `<plan-stem>.validate.json` to the same directory
+with the same schema. The `.signals` directory never interferes with `.plan`
+auto-discovery (only `*.md` files count as plans).
+
 See SKILL.md for the full contract.

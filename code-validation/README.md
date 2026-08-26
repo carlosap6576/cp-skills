@@ -51,4 +51,31 @@ Manual install (any runtime):
 ln -s "$PWD" ~/.claude/skills/code-validation
 ```
 
+## Pipeline signal (for automation)
+
+Every run ends by atomically writing one machine-readable JSON file to
+`<repo-root>/.plan/.signals/<plan-stem>.validate.json` (stem `pipeline` when
+the run stopped before a plan path was resolved). This is the pipeline's
+TERMINAL marker: it is written before the close-out, so it survives the plan
+file's deletion — external orchestrators read a definitive verdict here
+instead of inferring one from a missing plan:
+
+```json
+{
+  "schema": 1,
+  "skill": "code-validation",
+  "stage": "validate",
+  "status": "success",
+  "plan": "/abs/path/.plan/2026-08-26-add-export-plan.md",
+  "detail": "VALIDATION COMPLETE — 9 plan items verified, 0 fixed, 0 gaps filled, 4 files production-cleaned, 2 scaffolding files removed.",
+  "written_at": "2026-08-26T18:00:00+00:00"
+}
+```
+
+`status` is `success` only when the audit ended with the
+`VALIDATION COMPLETE` report; every failed or aborted audit signals `failed`
+with the reason in `detail` (and keeps the plan file for the re-run). The
+sibling skills write `<plan-stem>.plan.json` and `<plan-stem>.execute.json`
+to the same directory with the same schema.
+
 See SKILL.md for the full contract.

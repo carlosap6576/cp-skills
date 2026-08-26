@@ -1,7 +1,7 @@
 ---
 name: code-plan
-version: "1.12.0"
-description: "Turn a rough request into a precise, step-by-step implementation plan. One-shot: --desc/-d alone runs with zero prompts — the plan saves to a git-ignored .plan/ folder at the repo root (auto-created, .gitignore validated/updated every run); --path/-p overrides the destination. Auto-selects gstack expert lenses (eng/design/security/qa/…) to sharpen the plan; --skill=<skill> chains a follow-up skill on the finished plan. Debug tag defaults to ui-data (never prompted). Rewrites the instructions natively (in the model running the skill — no external LLM); writes a detailed, human-executable .md plan another agent can execute."
+version: "1.13.0"
+description: "Turn a rough request into a precise, step-by-step implementation plan. One-shot: --desc/-d alone runs with zero prompts — the plan saves to a git-ignored .plan/ folder at the repo root (auto-created, .gitignore validated/updated every run); --path/-p overrides the destination. Auto-selects gstack expert lenses (eng/design/security/qa/…) to sharpen the plan; --skill=<skill> chains a follow-up skill on the finished plan. Debug tag defaults to ui-data (never prompted). Rewrites the instructions natively (in the model running the skill — no external LLM); writes a detailed, human-executable .md plan another agent can execute. Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.plan.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat."
 argument-hint: 'code-plan | code-plan -d "add a CSV export button" [-p skills/plans] [--skill=plan-eng-review]'
 allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion, Skill
 license: "Proprietary - All Rights Reserved (see LICENSE)"
@@ -385,16 +385,44 @@ plans the router returns `autoplan` (it combos the CEO/design/eng/DX reviews)
 given, the `↪ handing off to` line states that the plan file is passed as the
 named review target (gstack's scope gate — see Step 13).
 
-## Step 12 — Cleanup
+## Step 12 — Pipeline signal + cleanup
+
+Both halves run on EVERY exit path, including the failure ones.
+
+**First, emit the machine-readable stage signal** — this is what lets external
+automation drive the plan → execute → validate pipeline without parsing chat:
+
+```bash
+"$CODE_PLAN_PYTHON" "$SKILL_DIR/scripts/code_plan.py" signal \
+  --plan "$PLAN_FILE" --status success \
+  --detail "plan written: {N} steps, tag {PROJECT_TAG}"
+```
+
+- `--status success` ONLY when the plan file was actually written (Step 10
+  finished). On any run that stops earlier, still emit the signal with
+  `--status failed` and a one-line `--detail` naming the reason — omit
+  `--plan` if no path was ever resolved — so a watching pipeline fails fast
+  instead of hanging.
+- The subcommand writes `<repo-root>/.plan/.signals/<plan-stem>.plan.json`
+  atomically (git-ignored with the rest of `.plan/`, even when the plan
+  itself was saved elsewhere via `-p`) and prints the signal path. It is
+  machinery, not chat — do not relay the path. A `WARN:` on stderr
+  (unwritable destination) → relay it in one line and continue; the signal
+  never blocks or fails the run.
+- Never write or edit a signal file by hand — the file is only ever the
+  subcommand's output, for the same reason code-validation's close-out prints
+  its own deletion line: the claim must be a consequence of the act.
+
+**Then cleanup:**
 
 ```bash
 rm -rf "$TMP"
 ```
 
-Run this on EVERY exit path, including the failure ones. The user's prose and
-the rendered prompt must not leak into a second invocation or another skill.
-(The Step 13 hand-off does not need `$TMP` — the enhanced brief is already in
-your context, and the plan file is a regular file on disk.)
+The user's prose and the rendered prompt must not leak into a second
+invocation or another skill. (The Step 13 hand-off does not need `$TMP` — the
+enhanced brief is already in your context, and the plan file is a regular
+file on disk.)
 
 ## Step 13 — Chain the follow-up skill (ONLY if `--skill`/`-s` was given)
 
@@ -465,3 +493,4 @@ Rules for this step:
 | `plan-path` exits 2 | Destination directory missing or not writable | Re-run with `--mkdir`, or pick a writable folder. |
 | `WARN: could not update .gitignore` | `.gitignore` unwritable in the `.plan` default case | The plan is still written to `.plan/`; add `.plan/` to `.gitignore` manually so plans stay out of commits. |
 | Plan saved to `.plan/` but I wanted another folder | No `-p` was passed, so the default applied | Re-run with `-p <dir>` — the flag always wins over the default. |
+| `WARN: could not write pipeline signal` | `.plan/.signals/` unwritable at the repo root | The plan itself is unaffected. Automation watching `.plan/.signals/` will not see this run — fix the permissions or drive the next stage manually. |

@@ -630,6 +630,137 @@ class CloseOutTests(unittest.TestCase):
             self.assertTrue(plan_dir.is_dir(), "the .plan folder must survive")
 
 
+class SignalTests(unittest.TestCase):
+    """Pipeline stage signal (v1.7.0): one atomic JSON file per stage under
+    <repo-root>/.plan/.signals/, so external automation can drive the
+    plan → execute → validate pipeline without parsing chat. The validate
+    signal is the pipeline's terminal marker — written before close-out, it
+    survives the plan deletion."""
+
+    STAGE = "validate"
+    SKILL = "code-validation"
+
+    def _run(self, argv, build=None, cwd_rel="."):
+        """Run `signal` inside a temp repo; return (captured, {name: json})
+        for every file left in .plan/.signals/."""
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            if build:
+                build(root)
+            prev = os.getcwd()
+            os.chdir(root / cwd_rel)
+            try:
+                cap = io_capture(code_validation.main, argv)
+            finally:
+                os.chdir(prev)
+            files = {}
+            sig_dir = root / ".plan" / ".signals"
+            if sig_dir.is_dir():
+                for f in sorted(sig_dir.iterdir()):
+                    if f.name.endswith(".json"):
+                        files[f.name] = json.loads(f.read_text(encoding="utf-8"))
+                    else:
+                        files[f.name] = None  # a leftover .tmp is a bug
+            return cap, files
+
+    def test_success_signal_has_the_full_schema(self):
+        def build(root):
+            (root / "a-plan.md").write_text("### Step\n", encoding="utf-8")
+        cap, files = self._run(
+            ["signal", "--status", "success", "--plan", "a-plan.md",
+             "--detail", "VALIDATION COMPLETE — 12 plan items verified, 2 fixed,"
+             " 1 gaps filled, 5 files production-cleaned, 3 scaffolding files removed."],
+            build=build)
+        self.assertEqual(cap.code, 0, cap.stderr)
+        name = f"a-plan.{self.STAGE}.json"
+        self.assertEqual(list(files), [name])
+        sig = files[name]
+        self.assertEqual(sig["schema"], 1)
+        self.assertEqual(sig["skill"], self.SKILL)
+        self.assertEqual(sig["stage"], self.STAGE)
+        self.assertEqual(sig["status"], "success")
+        self.assertTrue(os.path.isabs(sig["plan"]))
+        self.assertTrue(sig["plan"].endswith("a-plan.md"))
+        self.assertIn("VALIDATION COMPLETE", sig["detail"])
+        self.assertTrue(sig["written_at"])
+        # The signal path is printed for the harness, and no .tmp remains.
+        self.assertTrue(cap.stdout.strip().endswith(name))
+
+    def test_failed_signal_without_plan_uses_pipeline_stem(self):
+        cap, files = self._run(
+            ["signal", "--status", "failed", "--detail", "plan-check rejected"])
+        self.assertEqual(cap.code, 0, cap.stderr)
+        name = f"pipeline.{self.STAGE}.json"
+        self.assertEqual(list(files), [name])
+        self.assertEqual(files[name]["status"], "failed")
+        self.assertEqual(files[name]["plan"], "")
+
+    def test_signal_survives_close_out(self):
+        """The terminal-marker guarantee: signal first, close-out second —
+        the plan file is gone, the verdict is not."""
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            plan = root / ".plan" / "done-plan.md"
+            plan.parent.mkdir()
+            plan.write_text("### Step 1\n", encoding="utf-8")
+            prev = os.getcwd()
+            os.chdir(root)
+            try:
+                sig = io_capture(code_validation.main, [
+                    "signal", "--status", "success", "--plan", str(plan)])
+                out = io_capture(code_validation.main, [
+                    "close-out", "--plan", str(plan)])
+            finally:
+                os.chdir(prev)
+            self.assertEqual(sig.code, 0, sig.stderr)
+            self.assertEqual(out.code, 0, out.stderr)
+            self.assertFalse(plan.exists())
+            sig_file = root / ".plan" / ".signals" / f"done-plan.{self.STAGE}.json"
+            self.assertTrue(sig_file.is_file(),
+                            "the validate signal must survive close-out")
+            payload = json.loads(sig_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "success")
+
+    def test_signals_dir_never_counts_as_a_plan(self):
+        """default-plan must keep resolving the single *.md even with a
+        .signals directory (and its JSON) sitting inside .plan/."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            d = root / ".plan"
+            d.mkdir()
+            (d / "only-plan.md").write_text("### Step\n", encoding="utf-8")
+            (d / ".signals").mkdir()
+            (d / ".signals" / f"only-plan.{self.STAGE}.json").write_text(
+                "{}", encoding="utf-8")
+            prev = os.getcwd()
+            os.chdir(root)
+            try:
+                out = io_capture(code_validation.main, ["default-plan"])
+            finally:
+                os.chdir(prev)
+            self.assertEqual(out.code, 0, out.stderr)
+            self.assertTrue(out.stdout.strip().endswith("only-plan.md"))
+
+    def test_signal_resolves_repo_root_from_subdir(self):
+        def build(root):
+            (root / "src").mkdir()
+        cap, files = self._run(
+            ["signal", "--status", "failed"], build=build, cwd_rel="src")
+        self.assertEqual(cap.code, 0, cap.stderr)
+        # Landed at the repo ROOT's .plan/.signals even though cwd was src/.
+        self.assertEqual(list(files), [f"pipeline.{self.STAGE}.json"])
+
+    def test_invalid_status_is_rejected(self):
+        cap, files = self._run(["signal", "--status", "done"])
+        self.assertEqual(cap.code, 2)
+        self.assertEqual(files, {})
+
+
 class DocsContractTests(unittest.TestCase):
     """Pins the expert-awareness contract added in v1.5.0: the gstack expert
     roster ships with the skill, carries a verifiable gstack version pin

@@ -1,7 +1,7 @@
 ---
 name: code-validation
-version: "1.6.0"
-description: "Validate a completed implementation against its plan. -p/--path points at the plan .md the implementation was built from; when omitted, auto-discovery looks in the .plan folder at the repo root — exactly one plan there is validated with ZERO prompts, and only ambiguity (missing folder, no plans, or 2+ plans) asks for the path. Audits the implementation item-by-item and autonomously FIXES every issue found (code edits allowed; the plan file is never edited during validation). Creating tests/mocks/stubs to prove the work is encouraged, but they are proof, not payload: a mandatory production-cleanup sweep DELETES every generated test/mock/stub file after verification is green (pre-existing tests and plan-named test deliverables survive), polishes every touched file to a zero-comment production standard (no debug statements, no comments or AI notes on authored lines, no unused imports/dependencies — only functional directives and user-facing CLI/interface output survive), and passes a repo hygiene gate (.gitignore covers .plan/ and knowledge files; nothing lifecycle-generated is in the git flow), re-verified after the sweep. After a fully successful run, the plan file itself is DELETED as the close-out, and the run's final line states the deletion plus a same-session continuation note (any follow-up concerns keep going right here). Never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=review runs gstack's pre-landing /review) after the audit completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists + force flags, /qa, /cso, /design-review, /devex-review, /ship, …)."
+version: "1.7.0"
+description: "Validate a completed implementation against its plan. -p/--path points at the plan .md the implementation was built from; when omitted, auto-discovery looks in the .plan folder at the repo root — exactly one plan there is validated with ZERO prompts, and only ambiguity (missing folder, no plans, or 2+ plans) asks for the path. Audits the implementation item-by-item and autonomously FIXES every issue found (code edits allowed; the plan file is never edited during validation). Creating tests/mocks/stubs to prove the work is encouraged, but they are proof, not payload: a mandatory production-cleanup sweep DELETES every generated test/mock/stub file after verification is green (pre-existing tests and plan-named test deliverables survive), polishes every touched file to a zero-comment production standard (no debug statements, no comments or AI notes on authored lines, no unused imports/dependencies — only functional directives and user-facing CLI/interface output survive), and passes a repo hygiene gate (.gitignore covers .plan/ and knowledge files; nothing lifecycle-generated is in the git flow), re-verified after the sweep. After a fully successful run, the plan file itself is DELETED as the close-out, and the run's final line states the deletion plus a same-session continuation note (any follow-up concerns keep going right here). Never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=review runs gstack's pre-landing /review) after the audit completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists + force flags, /qa, /cso, /design-review, /devex-review, /ship, …). Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.validate.json, status success/failed) — written before the close-out, so it survives the plan deletion as the pipeline's terminal marker for external automation."
 argument-hint: 'code-validation -p skills/plans/<plan>.md [--skill=review]'
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill
 license: "Proprietary - All Rights Reserved (see LICENSE)"
@@ -255,7 +255,7 @@ than circumvent, and an armed `gstack-verify-gate` holds the turn open until
 the repo's declared verify command passes. No gstack → none of this applies;
 audit normally.
 
-## Step 5 — Integrity check and cleanup
+## Step 5 — Integrity check, pipeline signal, and cleanup
 
 Run on EVERY exit path, including failure:
 
@@ -266,6 +266,8 @@ if [ -z "$PLAN_MTIME" ] || [ -z "$PLAN_MTIME_NOW" ]; then
 elif [ "$PLAN_MTIME_NOW" != "$PLAN_MTIME" ]; then
   echo "LAW 3 VIOLATION: the plan file was modified during validation." >&2
 fi
+"$CODE_VALIDATION_PYTHON" "$SKILL_DIR/scripts/code_validation.py" signal \
+  --plan "$PLAN_ABS" --status "$SIGNAL_STATUS" --detail "$SIGNAL_DETAIL"
 rm -rf "$TMP"
 ```
 
@@ -273,6 +275,26 @@ An empty `PLAN_MTIME` on either side means the check could not run — say so
 loudly rather than reporting a false all-clear. This check must run BEFORE the
 Step 7 deletion — a deleted plan can no longer be stat'd, so skipping ahead
 would silently void the LAW 3 guarantee.
+
+**The pipeline signal** is the plan → execute → validate pipeline's TERMINAL
+marker for external automation. It is written HERE — before the Step 7
+close-out — so it survives the plan file's deletion and automation reads a
+definitive verdict instead of inferring one from a missing plan:
+
+- `SIGNAL_STATUS=success` ONLY when Step 4 ended with the
+  `VALIDATION COMPLETE` report; every other outcome — a failed or aborted
+  audit, a Step 2 rejection (emit the signal there too, before stopping; omit
+  `--plan` if no path was ever resolved) — is `SIGNAL_STATUS=failed`.
+- `SIGNAL_DETAIL` is one line: on success the `VALIDATION COMPLETE` counts
+  line verbatim; on failure the one-line reason for the stop.
+- The subcommand writes `<repo-root>/.plan/.signals/<plan-stem>.validate.json`
+  atomically (git-ignored with the rest of `.plan/` — the repo hygiene gate
+  already covers it) and prints the signal path. It is machinery, not chat —
+  do not relay the path. A `WARN:` on stderr (unwritable destination) → relay
+  it in one line and continue; the signal never blocks or fails the run.
+- Never write or edit a signal file by hand — the file is only ever the
+  subcommand's output, for the same reason the `PLAN DELETED` line is only
+  ever `close-out`'s stdout: the claim must be a consequence of the act.
 
 ## Step 6 — Recommend or chain the follow-up (only after a successful Step 4)
 
@@ -418,3 +440,4 @@ Strict rules for this step:
 | The run printed `PLAN DELETED` but the plan is still on disk | Step 7 was never executed — the line was composed by hand instead of relayed from `close-out` | A contract violation, not a script bug. The line may only ever be `close-out`'s stdout; re-run Step 7 (`close-out --plan "$PLAN_ABS"`) to actually delete it. |
 | `close-out` exits 2: "refusing to delete a directory" / "a non-.md file" | `$PLAN_ABS` is wrong — it is not the path `plan-check` resolved | Nothing was deleted. Re-derive `PLAN_ABS` from `plan-check` and re-run. |
 | `close-out` prints "note: plan file was already absent" | The plan was removed earlier (a re-run, or a manual delete) | Not an error — the end state is correct, so the deletion line is still printed and exit is 0. |
+| `WARN: could not write pipeline signal` | `.plan/.signals/` unwritable at the repo root | The validation itself is unaffected. Automation watching `.plan/.signals/` will not see this run's verdict — fix the permissions or read the chat report manually. |

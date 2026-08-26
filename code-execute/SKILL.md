@@ -1,7 +1,7 @@
 ---
 name: code-execute
-version: "1.3.0"
-description: "Execute an implementation plan from a file path. -p/--path points at an existing plan .md; when omitted, STRICT auto-discovery looks in the .plan folder at the repo root — exactly one plan there is executed, otherwise the skill STOPS and tells the user to pass -p (no prompting, no guessing). Runs the plan step-by-step from the repo root that contains it. Never edits the plan file, never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=validate runs /code-validation on the same plan) after execution completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists, /qa, /cso, /design-review, /devex-review, …)."
+version: "1.4.0"
+description: "Execute an implementation plan from a file path. -p/--path points at an existing plan .md; when omitted, STRICT auto-discovery looks in the .plan folder at the repo root — exactly one plan there is executed, otherwise the skill STOPS and tells the user to pass -p (no prompting, no guessing). Runs the plan step-by-step from the repo root that contains it. Never edits the plan file, never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=validate runs /code-validation on the same plan) after execution completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists, /qa, /cso, /design-review, /devex-review, …). Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.execute.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat."
 argument-hint: 'code-execute [-p skills/plans/<plan>.md] [--skill=validate]'
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill
 license: "Proprietary - All Rights Reserved (see LICENSE)"
@@ -181,7 +181,7 @@ deliberate guardrail to report rather than circumvent, expect an armed
 command passes, and cite the reachability probe's verbatim failure next to
 each `[MOCKED]` flag. No gstack → none of this applies; execute normally.
 
-## Step 5 — Integrity check and cleanup
+## Step 5 — Integrity check, pipeline signal, and cleanup
 
 Run on EVERY exit path, including failure:
 
@@ -192,11 +192,30 @@ if [ -z "$PLAN_MTIME" ] || [ -z "$PLAN_MTIME_NOW" ]; then
 elif [ "$PLAN_MTIME_NOW" != "$PLAN_MTIME" ]; then
   echo "LAW 3 VIOLATION: the plan file was modified during execution." >&2
 fi
+"$CODE_EXECUTE_PYTHON" "$SKILL_DIR/scripts/code_execute.py" signal \
+  --plan "$PLAN_ABS" --status "$SIGNAL_STATUS" --detail "$SIGNAL_DETAIL"
 rm -rf "$TMP"
 ```
 
 An empty `PLAN_MTIME` on either side means the check could not run — say so
 loudly rather than reporting a false all-clear.
+
+**The pipeline signal** is what lets external automation drive the
+plan → execute → validate pipeline without parsing chat:
+
+- `SIGNAL_STATUS=success` ONLY when Step 4 ended with the
+  `IMPLEMENTATION COMPLETE` report; every other outcome — a failed or partial
+  execution, a Step 1/2 STOP (emit the signal there too, before stopping;
+  omit `--plan` if no path was ever resolved) — is `SIGNAL_STATUS=failed`.
+- `SIGNAL_DETAIL` is one line: on success the completion report line verbatim;
+  on failure the one-line reason for the stop.
+- The subcommand writes `<repo-root>/.plan/.signals/<plan-stem>.execute.json`
+  atomically (git-ignored with the rest of `.plan/`) and prints the signal
+  path. It is machinery, not chat — do not relay the path. A `WARN:` on
+  stderr (unwritable destination) → relay it in one line and continue; the
+  signal never blocks or fails the run.
+- Never write or edit a signal file by hand — the file is only ever the
+  subcommand's output. The claim must be a consequence of the act.
 
 ## Step 6 — Recommend or chain the follow-up (only after a successful Step 4)
 
@@ -293,4 +312,5 @@ Rules for this step:
 | `render` exits 3: unsubstituted placeholder | The `execute-plan.md` template was hand-edited and a token other than `{{PATH}}` was introduced | Restore the canonical `prompts/execute-plan.md` (it carries only `{{PATH}}`). |
 | `render` exits 1: cannot read template | `prompts/execute-plan.md` is missing or unreadable | Reinstall the skill; the template ships in `prompts/`. |
 | An edit or command is denied mid-execution | A gstack guardrail (`/freeze`, `/guard`, `/careful` HIGH tier) fails closed on that path/command | Report which step is blocked and by what; the user lifts the boundary (`/unfreeze`) or amends the plan. Never work around it. |
+| `WARN: could not write pipeline signal` | `.plan/.signals/` unwritable at the repo root | The execution itself is unaffected. Automation watching `.plan/.signals/` will not see this run — fix the permissions or drive the next stage manually. |
 | The turn will not end after the completion report | The repo armed `gstack-verify-gate` (opt-in Stop hook) and its declared verify command is failing | Run the CLAUDE.md-declared verify command, fix the failure, and let the gate pass — it is a gate, not a bug. |

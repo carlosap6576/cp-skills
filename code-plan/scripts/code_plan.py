@@ -9,6 +9,8 @@ Subcommands:
   route           Deterministic expert-lens routing for instructions.
   render          Substitute placeholders in the plan prompt template.
   plan-path       Derive the {YYYY-MM-DD}-{slug}-plan.md path for a plan.
+  signal          Write the machine-readable pipeline stage signal
+                  (.plan/.signals/<plan-stem>.plan.json) for automation.
 
 Portable: Python 3.9+, standard library only (argparse, json, os, re, sys,
 pathlib, datetime). No network, no config resolution — the enhancement runs
@@ -22,7 +24,7 @@ import json
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 # Any remaining {{UPPER_TOKEN}} after substitution is a half-rendered prompt.
@@ -471,6 +473,66 @@ def cmd_render(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# `signal` — machine-readable pipeline stage marker
+# ---------------------------------------------------------------------------
+#
+# The plan → execute → validate lifecycle is driven by external automation
+# that cannot parse chat output. Each skill therefore ends every run by
+# writing one JSON signal file to <repo-root>/.plan/.signals/ — git-ignored
+# with the rest of .plan/, invisible to `.plan` auto-discovery (which counts
+# only *.md files), and written ATOMICALLY (tmp + os.replace) so a watcher
+# never reads a half-written file. The signal is emitted by this subcommand,
+# never composed by the model — the claim stays a consequence of an act,
+# exactly like code-validation's close-out.
+#
+# File:   .plan/.signals/<plan-stem>.<stage>.json   (stem "pipeline" when no
+#         plan path is known — e.g. a run that failed before resolving one)
+# Status: "success" | "failed" — success may ONLY be passed when the stage's
+#         real completion report happened (the SKILL.md step enforces this).
+
+SIGNAL_SCHEMA = 1
+SIGNAL_DIRNAME = ".signals"
+SIGNAL_SKILL = "code-plan"
+SIGNAL_STAGE = "plan"
+
+
+def cmd_signal(args: argparse.Namespace) -> int:
+    root = _find_repo_root(Path.cwd())
+    signal_dir = root / DEFAULT_PLAN_DIRNAME / SIGNAL_DIRNAME
+
+    plan_abs = ""
+    stem = "pipeline"
+    if args.plan:
+        p = Path(args.plan).expanduser()
+        plan_abs = str(p.resolve())
+        stem = p.stem or "pipeline"
+
+    payload = {
+        "schema": SIGNAL_SCHEMA,
+        "skill": SIGNAL_SKILL,
+        "stage": SIGNAL_STAGE,
+        "status": args.status,
+        "plan": plan_abs,
+        "detail": args.detail or "",
+        "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+    target = signal_dir / f"{stem}.{SIGNAL_STAGE}.json"
+    tmp = signal_dir / f"{stem}.{SIGNAL_STAGE}.json.tmp"
+    try:
+        signal_dir.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError as exc:
+        _err(f"WARN: could not write pipeline signal {target} ({exc}) — "
+             "automation watching for it will not see this run.")
+        return 1
+
+    print(str(target))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # argparse wiring
 # ---------------------------------------------------------------------------
 
@@ -529,6 +591,19 @@ def build_parser() -> argparse.ArgumentParser:
     grp.add_argument("--objective-file", default=None, help="read objective from file")
     sp.add_argument("--mkdir", action="store_true", help="create the directory if missing")
     sp.set_defaults(func=cmd_plan_path)
+
+    # signal
+    sp = sub.add_parser("signal",
+                        help="write the pipeline stage signal to "
+                             "<repo-root>/.plan/.signals/")
+    sp.add_argument("--status", required=True, choices=("success", "failed"),
+                    help="stage outcome; success ONLY when the plan was written")
+    sp.add_argument("--plan", default=None,
+                    help="path to the plan .md this run produced (omit if the "
+                         "run failed before a path was resolved)")
+    sp.add_argument("--detail", default=None,
+                    help="one-line human-readable outcome summary")
+    sp.set_defaults(func=cmd_signal)
 
     return p
 

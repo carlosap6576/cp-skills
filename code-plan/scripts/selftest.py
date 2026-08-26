@@ -577,6 +577,111 @@ class RoutingTableConsistencyTests(unittest.TestCase):
                 )
 
 
+class SignalTests(unittest.TestCase):
+    """Pipeline stage signal (v1.13.0): one atomic JSON file per stage under
+    <repo-root>/.plan/.signals/, so external automation can drive the
+    plan → execute → validate pipeline without parsing chat."""
+
+    STAGE = "plan"
+    SKILL = "code-plan"
+
+    def _run(self, argv, build=None, cwd_rel="."):
+        """Run `signal` inside a temp repo; return (captured, {name: json})
+        for every file left in .plan/.signals/."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            if build:
+                build(root)
+            prev = os.getcwd()
+            os.chdir(root / cwd_rel)
+            try:
+                cap = io_capture(code_plan.main, argv)
+            finally:
+                os.chdir(prev)
+            files = {}
+            sig_dir = root / ".plan" / ".signals"
+            if sig_dir.is_dir():
+                for f in sorted(sig_dir.iterdir()):
+                    if f.name.endswith(".json"):
+                        files[f.name] = json.loads(f.read_text(encoding="utf-8"))
+                    else:
+                        files[f.name] = None  # a leftover .tmp is a bug
+            return cap, files
+
+    def test_success_signal_has_the_full_schema(self):
+        def build(root):
+            d = root / ".plan"
+            d.mkdir()
+            (d / "2026-08-26-add-export-plan.md").write_text(
+                "### Step 1\n", encoding="utf-8")
+        cap, files = self._run(
+            ["signal", "--status", "success",
+             "--plan", ".plan/2026-08-26-add-export-plan.md",
+             "--detail", "plan written: 9 steps, tag ui-data"],
+            build=build)
+        self.assertEqual(cap.code, 0, cap.stderr)
+        name = f"2026-08-26-add-export-plan.{self.STAGE}.json"
+        self.assertEqual(list(files), [name])
+        sig = files[name]
+        self.assertEqual(sig["schema"], 1)
+        self.assertEqual(sig["skill"], self.SKILL)
+        self.assertEqual(sig["stage"], self.STAGE)
+        self.assertEqual(sig["status"], "success")
+        self.assertTrue(os.path.isabs(sig["plan"]))
+        self.assertTrue(sig["plan"].endswith("add-export-plan.md"))
+        self.assertIn("9 steps", sig["detail"])
+        self.assertTrue(sig["written_at"])
+        # The signal path is printed for the harness, and no .tmp remains.
+        self.assertTrue(cap.stdout.strip().endswith(name))
+
+    def test_failed_signal_without_plan_uses_pipeline_stem(self):
+        cap, files = self._run(
+            ["signal", "--status", "failed", "--detail", "stopped at Step 4"])
+        self.assertEqual(cap.code, 0, cap.stderr)
+        name = f"pipeline.{self.STAGE}.json"
+        self.assertEqual(list(files), [name])
+        self.assertEqual(files[name]["status"], "failed")
+        self.assertEqual(files[name]["plan"], "")
+
+    def test_rerun_overwrites_atomically(self):
+        """Last write wins; the .tmp intermediate never survives."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            (root / "p-plan.md").write_text("### Step\n", encoding="utf-8")
+            prev = os.getcwd()
+            os.chdir(root)
+            try:
+                first = io_capture(code_plan.main, [
+                    "signal", "--status", "failed", "--plan", "p-plan.md"])
+                second = io_capture(code_plan.main, [
+                    "signal", "--status", "success", "--plan", "p-plan.md"])
+            finally:
+                os.chdir(prev)
+            self.assertEqual(first.code, 0, first.stderr)
+            self.assertEqual(second.code, 0, second.stderr)
+            sig_dir = root / ".plan" / ".signals"
+            names = sorted(f.name for f in sig_dir.iterdir())
+            self.assertEqual(names, [f"p-plan.{self.STAGE}.json"])
+            sig = json.loads((sig_dir / names[0]).read_text(encoding="utf-8"))
+            self.assertEqual(sig["status"], "success")
+
+    def test_signal_resolves_repo_root_from_subdir(self):
+        def build(root):
+            (root / "src").mkdir()
+        cap, files = self._run(
+            ["signal", "--status", "failed"], build=build, cwd_rel="src")
+        self.assertEqual(cap.code, 0, cap.stderr)
+        # Landed at the repo ROOT's .plan/.signals even though cwd was src/.
+        self.assertEqual(list(files), [f"pipeline.{self.STAGE}.json"])
+
+    def test_invalid_status_is_rejected(self):
+        cap, files = self._run(["signal", "--status", "done"])
+        self.assertEqual(cap.code, 2)
+        self.assertEqual(files, {})
+
+
 # ---------------------------------------------------------------------------
 # stdout/stderr capture helper
 # ---------------------------------------------------------------------------
