@@ -1,6 +1,6 @@
 ---
 name: code-execute
-version: "1.4.0"
+version: "1.4.1"
 description: "Execute an implementation plan from a file path. -p/--path points at an existing plan .md; when omitted, STRICT auto-discovery looks in the .plan folder at the repo root — exactly one plan there is executed, otherwise the skill STOPS and tells the user to pass -p (no prompting, no guessing). Runs the plan step-by-step from the repo root that contains it. Never edits the plan file, never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=validate runs /code-validation on the same plan) after execution completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists, /qa, /cso, /design-review, /devex-review, …). Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.execute.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat."
 argument-hint: 'code-execute [-p skills/plans/<plan>.md] [--skill=validate]'
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill
@@ -230,9 +230,12 @@ line is always:
 next: /code-validation -p {PLAN_ABS} — audit the implementation against the plan and fix any gaps
 ```
 
-Then, when gstack is installed, consult the routing table in
-`$SKILL_DIR/prompts/gstack-experts.md` against what the execution ACTUALLY
-touched (the files changed, not the plan's aspirations) and append **at most
+Then, when gstack is installed, read the live roster in
+`$SKILL_DIR/prompts/gstack-contract.md` (every installed gstack expert; it
+supersedes the examples in `gstack-experts.md`) and consult the routing table
+in `$SKILL_DIR/prompts/gstack-experts.md` against what the execution ACTUALLY
+touched — pick the best-suited installed expert, new ones included, and tie the
+reason to what was touched (the files changed, not the plan's aspirations) and append **at most
 TWO** expert lines of the form:
 
 ```
@@ -286,13 +289,14 @@ Rules for this step:
   run** before chaining. A chained-skill failure must never cost the user
   their executed work — report it in ONE line ("`/{name}` isn't available —
   implementation is complete, run it manually") and stop; do not retry.
-- **gstack contract notes (verified against gstack 1.68.2.0; details in
+- **gstack contract notes (verified against gstack 1.87.0.0; details in
   `prompts/gstack-experts.md`):** a chained skill may resolve its own gate
   questions silently when the target is named in `args` (≥ 1.62) — asking
   nothing is not broken. `/review` dispatches its specialist subagents
   itself (testing, maintainability, security, performance, data-migration,
-  api-contract, red-team) and works in any target repo since 1.67; do not
-  pre-select specialists beyond force flags and context in `args`. `/ship`
+  api-contract, simplification, red-team — the live list is in
+  `prompts/gstack-contract.md`) and works in any target repo since 1.67; do
+  not pre-select specialists beyond force flags and context in `args`. `/ship`
   runs git under its own contract — LAW 1 binds THIS skill, not a skill the
   user explicitly chained. A durable-learnings close-out line at the end of
   a chained gstack skill is expected (≥ 1.68), not noise.

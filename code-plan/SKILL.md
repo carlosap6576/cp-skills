@@ -1,6 +1,6 @@
 ---
 name: code-plan
-version: "1.13.0"
+version: "1.13.1"
 description: "Turn a rough request into a precise, step-by-step implementation plan. One-shot: --desc/-d alone runs with zero prompts — the plan saves to a git-ignored .plan/ folder at the repo root (auto-created, .gitignore validated/updated every run); --path/-p overrides the destination. Auto-selects gstack expert lenses (eng/design/security/qa/…) to sharpen the plan; --skill=<skill> chains a follow-up skill on the finished plan. Debug tag defaults to ui-data (never prompted). Rewrites the instructions natively (in the model running the skill — no external LLM); writes a detailed, human-executable .md plan another agent can execute. Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.plan.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat."
 argument-hint: 'code-plan | code-plan -d "add a CSV export button" [-p skills/plans] [--skill=plan-eng-review]'
 allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion, Skill
@@ -311,7 +311,12 @@ baseline lens set, and you may adjust it by at most one lens.
    report (e.g. `Experts: eng+design (+design: the endpoint is only consumed
    by a new settings panel)`). Never replace the whole set; never exceed 3.
 3. `recommended_skill` from the JSON is what Step 11's `next:` line prints and
-   what a missing `--skill` would have chained.
+   what a missing `--skill` would have chained. When gstack is installed,
+   check it against the live roster in `$SKILL_DIR/prompts/gstack-contract.md`
+   (every installed gstack expert with its description): if an installed
+   expert — including one added to gstack after this skill was written — suits
+   the plan better, name it on the `next:` line with a one-line reason and keep
+   the routed one as the fallback. The snapshot supersedes the routing table.
 4. **Lens CONTENT** still comes from `Read "$SKILL_DIR/prompts/expert-lenses.md"`;
    compose the selected sections verbatim, each under a
    `Selected because: <one line>` header, and `Write` them to `$TMP/lenses.md`.

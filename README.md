@@ -14,14 +14,45 @@ all — they are independent except where noted.
 
 ## Install
 
+One command installs every skill in this repo into every skills root your
+agent harnesses scan (Claude Code, Codex, Gemini CLI, Cursor, Copilot,
+OpenCode, Hermes, OpenClaw, `~/.agents`). It runs as a doctor: checks the
+source and dependencies, symlinks or upgrades each skill, and reports every
+change with its version.
+
 ```bash
 git clone https://github.com/carlosap6576/cp-skills.git
-cd cp-skills/<skill-name>
-./install.sh          # symlinks into every detected skills root
-./install.sh --copy   # copy instead of symlink
+cd cp-skills
+./install.sh              # install/upgrade all skills into every detected root
+./install.sh --doctor     # checkup only: diagnose, change nothing
+./install.sh --copy       # copy instead of symlink (upgraded in place on rerun)
+./install.sh --only code-plan,stock-eval   # a subset (or --skip a,b)
+./install.sh --dir ~/.claude/skills        # one root only
+./install.sh --list       # discovered skills + versions
+./install.sh --uninstall  # remove from every root
 ```
 
-Each skill's own README covers its specific install flags.
+The same run keeps gstack current and the `code-*` skills in step with it:
+gstack is cloned if missing, an existing git checkout is fast-forwarded to
+`origin/main` and its `./setup` rerun, and the hand-off contract is then
+re-verified against what is actually installed. The verified facts land in
+each `code-*` skill's `prompts/gstack-contract.md` (every installed gstack
+expert with its description, `/review`'s specialists, force flags and
+thresholds, `/autoplan`'s phase order, plan-review scope gates), the skills'
+"verified against gstack X" pins are bumped, and their patch version is bumped
+when the snapshot changed. The skills treat that snapshot as the live roster
+and pick the best-suited installed expert, so new gstack experts are usable as
+soon as the installer has run. `--no-gstack` skips all of it, `--no-sync`
+upgrades gstack but leaves the snapshot alone.
+
+A skill is any top-level folder with a `SKILL.md`, so new skills are picked
+up automatically. Versions come from each skill's `SKILL.md` frontmatter
+(cross-checked against its `plugin.json`); a record of what is installed
+where lives in `~/.config/cp-skills/installed.tsv`. Set
+`CP_SKILLS_ROOTS="dir1:dir2"` to override the candidate roots.
+
+Each skill also ships its own `install.sh` with the same flags for
+installing that one skill on its own.
 
 ## Requirements
 
