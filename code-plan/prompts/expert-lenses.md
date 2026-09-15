@@ -6,7 +6,7 @@ across gstack releases even as the skills' procedures evolve. Selection is
 routed against the deterministic `route` subcommand (the baseline); this file
 only supplies the lens content for the shortlisted experts.
 
-Verified against gstack 1.87.0.0 by hand. Lens ids and skill names here MUST
+Verified against gstack 1.87.3.0 by hand. Lens ids and skill names here MUST
 stay in sync with SIGNALS / LENS_SKILL in scripts/code_plan.py (enforced by
 selftest RoutingTableConsistencyTests).
 
@@ -219,7 +219,7 @@ separate ones).
 
 ### gstack hand-off contract notes
 
-Behavioral facts about the follow-up skills, verified against gstack 1.87.0.0
+Behavioral facts about the follow-up skills, verified against gstack 1.87.3.0
 by hand; the live snapshot in `prompts/gstack-contract.md` supersedes any
 version-specific detail here. These change how a chained review behaves — not
 which skill is recommended:

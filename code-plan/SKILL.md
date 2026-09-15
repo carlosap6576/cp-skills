@@ -1,6 +1,6 @@
 ---
 name: code-plan
-version: "1.13.1"
+version: "1.13.2"
 description: "Turn a rough request into a precise, step-by-step implementation plan. One-shot: --desc/-d alone runs with zero prompts — the plan saves to a git-ignored .plan/ folder at the repo root (auto-created, .gitignore validated/updated every run); --path/-p overrides the destination. Auto-selects gstack expert lenses (eng/design/security/qa/…) to sharpen the plan; --skill=<skill> chains a follow-up skill on the finished plan. Debug tag defaults to ui-data (never prompted). Rewrites the instructions natively (in the model running the skill — no external LLM); writes a detailed, human-executable .md plan another agent can execute. Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.plan.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat."
 argument-hint: 'code-plan | code-plan -d "add a CSV export button" [-p skills/plans] [--skill=plan-eng-review]'
 allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion, Skill
