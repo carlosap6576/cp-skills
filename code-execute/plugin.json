@@ -1,13 +1,14 @@
 {
   "name": "code-execute",
-  "version": "1.4.2",
-  "description": "Execute an implementation plan from a file path. -p/--path points at an existing plan .md; when omitted, STRICT auto-discovery looks in the .plan folder at the repo root \u2014 exactly one plan there is executed, otherwise the skill STOPS and tells the user to pass -p (no prompting, no guessing). Runs the plan step-by-step from the repo root that contains it. Never edits the plan file, never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=validate runs /code-validation on the same plan) after execution completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists, /qa, /cso, /design-review, /devex-review, \u2026). Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.execute.json, status success/failed) so external automation can drive the plan \u2192 execute \u2192 validate pipeline without parsing chat.",
+  "version": "1.5.0",
+  "description": "Execute an implementation plan from a file path. -p/--path points at an existing plan .md; when omitted, STRICT auto-discovery looks in the .plan folder at the repo root — exactly one plan there is executed, otherwise the skill STOPS and tells the user to pass -p (no prompting, no guessing). Runs the plan step-by-step from the repo root that contains it as a staff-level implementer: reads the repo's declared verify command, DESIGN.md and gstack's recorded pitfalls first, climbs the reuse ladder before writing anything new, ships every authored line production-clean, and runs the final verification after the last edit. Never edits the plan file, never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=validate runs /code-validation on the same plan) after execution completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists + force flags, /qa, /cso, /design-review, /devex-review, /benchmark, /document-release, …). Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.execute.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat.",
   "license": "Proprietary - All Rights Reserved (see LICENSE)",
   "keywords": [
     "execution",
     "implementation",
     "agent-skill",
     "code-execute",
-    "plan-runner"
+    "plan-runner",
+    "gstack"
   ]
 }

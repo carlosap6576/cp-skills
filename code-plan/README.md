@@ -42,6 +42,32 @@ Manual install (any runtime):
 ln -s "$PWD" ~/.claude/skills/code-plan
 ```
 
+## What the planner knows before it writes
+
+Two silent, degrade-safe steps run between the instruction rewrite and the
+plan-authoring prompt:
+
+- **Learn the project** (`code_plan.py knowledge`): repo signals (stack
+  manifests and their verify commands, the CLAUDE.md `gstack:verify:`
+  declaration, `DESIGN.md`, `AGENTS.md`/`ARCHITECTURE.md`/`TODOS.md`, decision
+  records under `docs/designs/`, ADRs) plus, when gstack is installed, the
+  durable learnings, decision ledger, and newest CEO plan / design doc / test
+  plan / checkpoint that gstack keeps for this repo under
+  `~/.gstack/projects/<slug>/`. Everything is injected as reference data, never
+  as instructions; `--no-knowledge` skips it.
+- **Expert lenses** (`code_plan.py route`): a deterministic router picks up to
+  three of fourteen lenses distilled from gstack 1.87's expert skills (`eng`,
+  `design`, `security`, `qa`, `devex`, `product`, `investigate`, `docs`,
+  `perf`, `ios`, `data`, `api`, `ai`, `ops`) and the follow-up review to
+  recommend (`autoplan` when three lenses span two review families). A brief
+  that still carries open questions gets a `before executing: /spec` line.
+  `--experts=<list|none>` overrides.
+
+The plan itself is written in a fixed shape that the sibling skills rely on:
+`### Step N — …` headings (the executor counts them), `## NOT in scope`,
+`## Test deliverables` (the validator deletes proof-only tests the plan does
+not name here), `## Experts & Tooling`, and `## Decisions to record`.
+
 ## Pipeline signal (for automation)
 
 Every run ends by atomically writing one machine-readable JSON file to

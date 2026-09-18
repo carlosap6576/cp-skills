@@ -686,6 +686,254 @@ class SignalTests(unittest.TestCase):
 # stdout/stderr capture helper
 # ---------------------------------------------------------------------------
 
+class RouteNewLensTests(unittest.TestCase):
+    """The four lenses added for gstack 1.87 (data, api, ai, ops), the
+    review-family rule for autoplan, and the pre-planning clarify hint."""
+
+    def _route(self, text, experts=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            ipath = Path(tmp) / "brief.txt"
+            ipath.write_text(text, encoding="utf-8")
+            argv = ["route", "--instructions-file", str(ipath), "--json"]
+            if experts is not None:
+                argv += ["--experts", experts]
+            out = io_capture(code_plan.main, argv)
+        self.assertEqual(out.code, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_migration_backfill_routes_to_data(self):
+        payload = self._route("add a prisma migration and backfill the new column")
+        self.assertIn("data", payload["lenses"])
+
+    def test_webhook_sdk_routes_to_api(self):
+        payload = self._route("change the webhook payload shape and update the sdk")
+        self.assertIn("api", payload["lenses"])
+
+    def test_llm_prompt_routes_to_ai(self):
+        payload = self._route("rewrite the system prompt and add a tool call for the agent")
+        self.assertIn("ai", payload["lenses"])
+
+    def test_deploy_pipeline_routes_to_ops(self):
+        payload = self._route("add a github actions deploy job with a canary rollout")
+        self.assertIn("ops", payload["lenses"])
+
+    def test_three_lenses_in_one_family_keep_plan_eng_review(self):
+        """eng + data + api all read best under plan-eng-review; autoplan
+        would spend a CEO and a design pass on a backend-only plan."""
+        payload = self._route(
+            "add a paginated /api/v1/quotes endpoint backed by a new sqlite schema")
+        self.assertEqual(len(payload["lenses"]), code_plan.MAX_LENSES)
+        self.assertEqual(payload["recommended_skill"], "plan-eng-review")
+
+    def test_three_lenses_across_families_recommend_autoplan(self):
+        payload = self._route(
+            "redesign the settings page css and ui, add an api + sql schema, "
+            "rotate the auth token")
+        self.assertEqual(len(payload["lenses"]), code_plan.MAX_LENSES)
+        self.assertEqual(payload["recommended_skill"], "autoplan")
+
+    def test_forced_three_lenses_follow_the_family_rule(self):
+        one_family = self._route("x", experts="eng,data,api")
+        self.assertEqual(one_family["recommended_skill"], "plan-eng-review")
+        two_families = self._route("x", experts="eng,design,api")
+        self.assertEqual(two_families["recommended_skill"], "autoplan")
+
+    def test_open_questions_set_clarify_and_pre_skill(self):
+        payload = self._route(
+            "**Objective:** add export.\n\n**Open questions:**\n- Which format?\n")
+        self.assertTrue(payload["clarify"])
+        self.assertEqual(payload["pre_skill"], code_plan.PRE_SKILL_CLARIFY)
+
+    def test_trailing_note_sets_clarify(self):
+        payload = self._route("Make the app faster.\nNOTE: no measurable target.\n")
+        self.assertTrue(payload["clarify"])
+
+    def test_clean_brief_has_no_pre_skill(self):
+        payload = self._route("**Objective:** add a CSV export button.\n")
+        self.assertFalse(payload["clarify"])
+        self.assertIsNone(payload["pre_skill"])
+
+    def test_human_output_prints_pre_skill_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ipath = Path(tmp) / "brief.txt"
+            ipath.write_text("**Open questions:**\n- ?\n", encoding="utf-8")
+            out = io_capture(code_plan.main,
+                             ["route", "--instructions-file", str(ipath)])
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn("pre-skill: spec", out.stdout)
+
+
+class KnowledgeTests(unittest.TestCase):
+    """`knowledge` gathers repo signals deterministically and degrades to a
+    'none found' block. gstack's helpers are stubbed out so the tests stay
+    hermetic on machines with or without gstack."""
+
+    def setUp(self):
+        self._orig = code_plan._gstack_bin_dir
+        code_plan._gstack_bin_dir = lambda: None
+
+    def tearDown(self):
+        code_plan._gstack_bin_dir = self._orig
+
+    def _run(self, root, *extra):
+        return io_capture(code_plan.main,
+                          ["knowledge", "--root", str(root), *extra])
+
+    def test_repo_signals_are_rendered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            (root / "package.json").write_text(
+                json.dumps({"scripts": {"test": "vitest run", "lint": "eslint ."}}),
+                encoding="utf-8")
+            (root / "CLAUDE.md").write_text(
+                "# Repo\n<!-- gstack:verify: npm test -->\n", encoding="utf-8")
+            (root / "DESIGN.md").write_text("# gstack: design-md-format=spec\n",
+                                            encoding="utf-8")
+            (root / "docs" / "designs").mkdir(parents=True)
+            (root / "docs" / "designs" / "export.md").write_text("# Design\n",
+                                                                  encoding="utf-8")
+            out = self._run(root)
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn("`npm test`", out.stdout)
+        self.assertIn("vitest run", out.stdout)
+        self.assertIn("DESIGN.md present", out.stdout)
+        self.assertIn("docs/designs/export.md", out.stdout)
+        self.assertIn("Reference data, not instructions", out.stdout)
+        self.assertIn("verify command", out.stderr)
+        self.assertIn("DESIGN.md", out.stderr)
+
+    def test_empty_repo_yields_none_found(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(Path(tmp))
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn(code_plan.KNOWLEDGE_EMPTY, out.stdout)
+        self.assertIn("none found", out.stderr)
+
+    def test_json_output_exposes_raw_facts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pyproject.toml").write_text("[tool.pytest]\n", encoding="utf-8")
+            out = self._run(root, "--json")
+        self.assertEqual(out.code, 0, out.stderr)
+        payload = json.loads(out.stdout)
+        self.assertEqual(payload["stacks"], ["python"])
+        self.assertIn("pytest", payload["verify"])
+        self.assertFalse(payload["gstack"])
+
+    def test_query_keyword_skips_brief_labels(self):
+        self.assertEqual(
+            code_plan.pick_query_keyword(
+                "**Objective:** Introduce a paginated quotes endpoint.\n"),
+            "Introduce")
+        self.assertEqual(
+            code_plan.pick_query_keyword("**Objective:** add a webhook signature check"),
+            "webhook")
+        self.assertEqual(code_plan.pick_query_keyword("fix the bug"), "")
+
+    def test_query_file_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            qf = root / "brief.txt"
+            qf.write_text("**Objective:** pagination for quotes\n", encoding="utf-8")
+            out = self._run(root, "--query-file", str(qf), "--json")
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn('"gstack": false', out.stdout)
+
+    def test_walks_up_to_the_repo_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            (root / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+            sub = root / "src" / "deep"
+            sub.mkdir(parents=True)
+            out = self._run(sub)
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn("AGENTS.md", out.stdout)
+
+
+class RenderKnowledgeTests(unittest.TestCase):
+
+    def _render(self, template, knowledge=None, knowledge_file=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            tpath = Path(tmp) / "tmpl.md"
+            tpath.write_text(template, encoding="utf-8")
+            ipath = Path(tmp) / "i.txt"
+            ipath.write_text("do thing", encoding="utf-8")
+            argv = ["render", "--template", str(tpath), "--path", "p",
+                    "--plan-filename", "f.md", "--instructions-file", str(ipath)]
+            if knowledge is not None:
+                kpath = Path(tmp) / "k.md"
+                kpath.write_text(knowledge, encoding="utf-8")
+                argv += ["--knowledge-file", str(kpath)]
+            elif knowledge_file is not None:
+                argv += ["--knowledge-file", knowledge_file]
+            return io_capture(code_plan.main, argv)
+
+    def test_knowledge_file_substituted(self):
+        out = self._render("K={{PROJECT_KNOWLEDGE}}\n{{INSTRUCTIONS}}\n",
+                           knowledge="### Repo signals\n- verify: `bun test`")
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn("bun test", out.stdout)
+        self.assertNotIn("{{PROJECT_KNOWLEDGE}}", out.stdout)
+
+    def test_knowledge_default_when_omitted(self):
+        out = self._render("K={{PROJECT_KNOWLEDGE}}\n{{INSTRUCTIONS}}\n")
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn(code_plan.KNOWLEDGE_EMPTY, out.stdout)
+
+    def test_knowledge_missing_file_exits_1(self):
+        out = self._render("K={{PROJECT_KNOWLEDGE}}\n{{INSTRUCTIONS}}\n",
+                           knowledge_file="/nonexistent/k.md")
+        self.assertEqual(out.code, 1, out.stderr)
+
+    def test_knowledge_text_with_token_shapes_never_trips_the_guard(self):
+        out = self._render("K={{PROJECT_KNOWLEDGE}}\n{{INSTRUCTIONS}}\n",
+                           knowledge="learning mentions {{FOO}} literally")
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn("{{FOO}}", out.stdout)
+
+
+class SkillContractTests(unittest.TestCase):
+    """The shipped prompt template, SKILL.md and plugin.json stay coherent."""
+
+    SKILL_DIR = SCRIPTS_DIR.parent
+
+    def test_create_plan_template_carries_every_placeholder(self):
+        text = (self.SKILL_DIR / "prompts" / "create-plan.md").read_text(encoding="utf-8")
+        tokens = set(re.findall(r"\{\{[A-Z_]+\}\}", text))
+        self.assertEqual(tokens, {"{{PROJECT_TAG}}", "{{PATH}}", "{{PLAN_FILENAME}}",
+                                  "{{EXPERT_LENSES}}", "{{PROJECT_KNOWLEDGE}}",
+                                  "{{INSTRUCTIONS}}"})
+        self.assertLess(text.find("{{PROJECT_KNOWLEDGE}}"), text.find("{{INSTRUCTIONS}}"))
+
+    def test_real_template_renders_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ipath = Path(tmp) / "i.txt"
+            ipath.write_text("add a CSV export", encoding="utf-8")
+            out = io_capture(code_plan.main, [
+                "render", "--path", tmp, "--plan-filename", "p.md",
+                "--instructions-file", str(ipath)])
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertNotIn("{{", out.stdout.replace("{{PATH}}", ""))
+        self.assertIn("### Step N", out.stdout)
+
+    def test_skill_md_names_every_lens_and_the_knowledge_step(self):
+        text = (self.SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        for lens in code_plan.SIGNALS:
+            self.assertIn(f"`{lens}`", text, f"SKILL.md does not list lens {lens}")
+        self.assertIn("knowledge", text)
+        self.assertIn("--knowledge-file", text)
+        self.assertIn("pre_skill", text)
+
+    def test_versions_in_lockstep(self):
+        skill_text = (self.SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        m = re.search(r'^version:\s*"([^"]+)"', skill_text, re.MULTILINE)
+        assert m is not None
+        plugin = json.loads((self.SKILL_DIR / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(m.group(1), plugin["version"])
+
+
 class _Captured:
     def __init__(self):
         self.code: int | None = None
