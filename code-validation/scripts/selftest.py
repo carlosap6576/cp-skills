@@ -483,6 +483,46 @@ class PrCleanContractTests(unittest.TestCase):
         self.assertIn("Repo hygiene gate", self.readme)
 
 
+class ImprovementMandateContractTests(unittest.TestCase):
+    """Tripwires for LAW 7 (improve, don't just approve). The executor runs a
+    lower-tier model, so validation must refactor its output to production
+    grade — the mandate lives in prose, so pin its load-bearing phrases."""
+
+    SKILL_DIR = Path(__file__).resolve().parent.parent
+
+    @classmethod
+    def setUpClass(cls):
+        cls.template = (cls.SKILL_DIR / "prompts" / "validate-code.md").read_text(
+            encoding="utf-8")
+        cls.skill_md = (cls.SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_phase3_has_three_ordered_passes_before_verification(self):
+        fix = self.template.find("### 3a — Fix & fill")
+        refactor = self.template.find("### 3b — Refactor to production grade")
+        gate = self.template.find("### 3c — Staff-review gate")
+        verify = self.template.find("## Phase 4 — Verify Everything Works")
+        for pos, name in ((fix, "3a"), (refactor, "3b"), (gate, "3c"),
+                          (verify, "Phase 4")):
+            self.assertNotEqual(pos, -1, f"{name} heading missing")
+        self.assertLess(fix, refactor)
+        self.assertLess(refactor, gate)
+        self.assertLess(gate, verify, "refactors must be proven by Phase 4")
+
+    def test_template_frames_executor_output_as_a_first_draft(self):
+        self.assertIn("lower-tier", self.template)
+        self.assertIn("Improve, don't just approve", self.template)
+        self.assertIn("Never approve executor code as-is", self.template)
+        self.assertIn("zero comments", self.template)
+
+    def test_refactors_name_their_property_and_skip_churn(self):
+        self.assertIn("churn", self.template)
+        self.assertIn("names the property it improves", self.template)
+
+    def test_skill_md_carries_law_7_and_the_r_counter(self):
+        self.assertIn("LAW 7", self.skill_md)
+        self.assertIn("{R} improvements made", self.skill_md)
+
+
 class PlanDeletionContractTests(unittest.TestCase):
     """Tripwires for LAW 6 (end-of-run plan deletion). The close-out lives in
     SKILL.md prose, so a hand-edit that drops it would fail silently — the
@@ -671,7 +711,7 @@ class SignalTests(unittest.TestCase):
         cap, files = self._run(
             ["signal", "--status", "success", "--plan", "a-plan.md",
              "--detail", "VALIDATION COMPLETE — 12 plan items verified, 2 fixed,"
-             " 1 gaps filled, 5 files production-cleaned, 3 scaffolding files removed."],
+             " 1 gaps filled, 4 improvements made, 5 files production-cleaned, 3 scaffolding files removed."],
             build=build)
         self.assertEqual(cap.code, 0, cap.stderr)
         name = f"a-plan.{self.STAGE}.json"

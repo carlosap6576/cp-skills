@@ -5,9 +5,11 @@ implementation against the plan `.md` it was built from — and autonomously
 fixes every issue it finds. It validates the plan is a real stepped plan, pins
 the working directory to the repo root that contains the plan, renders the
 audit prompt, and follows it through six phases (traceability matrix → deep
-validation → fix/fill/improve → re-verify → production cleanup sweep →
-report). The implementation code is edited to fix findings and then swept
-**PR-clean**. The plan file is never edited during validation, and git is
+validation → fix, fill & production-grade refactor with a staff-review gate →
+re-verify → production cleanup sweep → report). The executor runs a
+lower-tier model, so its output is treated as a first draft: validation
+fixes findings **and** refactors every touched file until a demanding
+reviewer would leave zero comments, then sweeps it **PR-clean**. The plan file is never edited during validation, and git is
 never run.
 This is the third and final phase of the plan → execute → validate lifecycle
 (`/code-plan` → `/code-execute` → `/code-validation`).
@@ -67,7 +69,7 @@ instead of inferring one from a missing plan:
   "stage": "validate",
   "status": "success",
   "plan": "/abs/path/.plan/2026-08-26-add-export-plan.md",
-  "detail": "VALIDATION COMPLETE — 9 plan items verified, 0 fixed, 0 gaps filled, 4 files production-cleaned, 2 scaffolding files removed.",
+  "detail": "VALIDATION COMPLETE — 9 plan items verified, 0 fixed, 0 gaps filled, 3 improvements made, 4 files production-cleaned, 2 scaffolding files removed.",
   "written_at": "2026-08-26T18:00:00+00:00"
 }
 ```

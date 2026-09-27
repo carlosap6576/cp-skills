@@ -1,7 +1,7 @@
 ---
 name: code-validation
-version: "1.9.2"
-description: "Validate a completed implementation against its plan. -p/--path points at the plan .md the implementation was built from; when omitted, auto-discovery looks in the .plan folder at the repo root — exactly one plan there is validated with ZERO prompts, and only ambiguity (missing folder, no plans, or 2+ plans) asks for the path. The senior pass of the lifecycle: audits the implementation item-by-item against the plan and the repo's own rules (CLAUDE.md verify command, DESIGN.md tokens, gstack pitfalls), runs the pre-landing critical pass a reviewer would (SQL/shell safety, races, N+1, trust boundaries, swallowed errors), autonomously FIXES every issue found, completes what the executor left partial, and simplifies what it over-built without ever cutting coverage (code edits allowed; the plan file is never edited during validation). Creating tests/mocks/stubs to prove the work is encouraged, but they are proof, not payload: a mandatory production-cleanup sweep DELETES every generated test/mock/stub file after verification is green (pre-existing tests and plan-named test deliverables survive), polishes every touched file to a zero-comment production standard (no debug statements, no comments or AI notes on authored lines, no unused imports/dependencies — only functional directives and user-facing CLI/interface output survive), and passes a repo hygiene gate (.gitignore covers .plan/ and knowledge files; nothing lifecycle-generated is in the git flow), re-verified after the sweep. After a fully successful run, the plan file itself is DELETED as the close-out, and the run's final line states the deletion plus a same-session continuation note (any follow-up concerns keep going right here). Never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=review runs gstack's pre-landing /review) after the audit completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists + force flags, /qa, /cso, /design-review, /devex-review, /ship, …). Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.validate.json, status success/failed) — written before the close-out, so it survives the plan deletion as the pipeline's terminal marker for external automation."
+version: "1.10.0"
+description: "Validate a completed implementation against its plan. -p/--path points at the plan .md the implementation was built from; when omitted, auto-discovery looks in the .plan folder at the repo root — exactly one plan there is validated with ZERO prompts, and only ambiguity (missing folder, no plans, or 2+ plans) asks for the path. The senior pass of the lifecycle: audits the implementation item-by-item against the plan and the repo's own rules (CLAUDE.md verify command, DESIGN.md tokens, gstack pitfalls), runs the pre-landing critical pass a reviewer would (SQL/shell safety, races, N+1, trust boundaries, swallowed errors), autonomously FIXES every issue found, completes what the executor left partial, REFACTORS every file in the footprint to production grade (the executor runs a lower-tier model — its output is a first draft; passing tests is the floor, and every improvement found is made, not suggested, then closed by a staff-review gate), and simplifies what it over-built without ever cutting coverage (code edits allowed; the plan file is never edited during validation). Creating tests/mocks/stubs to prove the work is encouraged, but they are proof, not payload: a mandatory production-cleanup sweep DELETES every generated test/mock/stub file after verification is green (pre-existing tests and plan-named test deliverables survive), polishes every touched file to a zero-comment production standard (no debug statements, no comments or AI notes on authored lines, no unused imports/dependencies — only functional directives and user-facing CLI/interface output survive), and passes a repo hygiene gate (.gitignore covers .plan/ and knowledge files; nothing lifecycle-generated is in the git flow), re-verified after the sweep. After a fully successful run, the plan file itself is DELETED as the close-out, and the run's final line states the deletion plus a same-session continuation note (any follow-up concerns keep going right here). Never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=review runs gstack's pre-landing /review) after the audit completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists + force flags, /qa, /cso, /design-review, /devex-review, /ship, …). Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.validate.json, status success/failed) — written before the close-out, so it survives the plan deletion as the pipeline's terminal marker for external automation."
 argument-hint: 'code-validation [-p skills/plans/<plan>.md] [--skill=review|qa|ship]'
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill
 license: "Proprietary - All Rights Reserved (see LICENSE)"
@@ -21,10 +21,17 @@ metadata:
 You are inside the `/code-validation` skill. It takes one input (the path to the
 plan `.md` that a completed implementation was built from), renders the
 validation audit prompt, and then follows that prompt as instructions — auditing
-the implementation against the plan and FIXING every issue it finds, from the
-repo root that contains the plan file.
+the implementation against the plan, FIXING every issue it finds, and
+REFACTORING the executor's code to production grade, from the repo root that
+contains the plan file.
 
-Six laws govern this skill. Each maps to a specific failure mode:
+**The role.** `/code-execute` runs on a lower-tier, throughput-tuned model;
+`/code-validation` is the most capable pass in the plan → execute → validate
+pipeline and the last engineer to touch the code before a human reviews it.
+Validation is necessary but not sufficient: every run validates, improves,
+and proves. An audit that only confirms the executor's work is incomplete.
+
+Seven laws govern this skill. Each maps to a specific failure mode:
 
 - **LAW 1 — NEVER run git.** No `git add` / `commit` / `push` / `checkout` /
   `branch`. The user reviews and commits the fixes. Running git here is a
@@ -87,6 +94,17 @@ Six laws govern this skill. Each maps to a specific failure mode:
   deletion runs only after the Step 5 integrity check has passed — LAW 3 holds
   for the entire validation; LAW 6 is the one sanctioned exception, at the
   very end.
+
+- **LAW 7 — Improve, don't just approve.** Executor code is a first draft
+  from a lower-tier model. Every file in the change's footprint gets the
+  Phase 3b production-grade refactor pass (naming, structure, reuse, types,
+  idioms, error handling, performance, consistency with the repo) and the
+  Phase 3c staff-review gate — read the full diff as a demanding reviewer and
+  make every change you would comment on, until a read produces zero
+  comments. Improvements are made in the code, never listed as suggestions.
+  Each refactor names the property it improves; taste-only churn and
+  drive-by rewrites outside the footprint are out. Passing tests never
+  exempt a file.
 
 ## Contract precedence
 
@@ -248,9 +266,10 @@ That means: read the plan file at `$PLAN_ABS`, then run the full six-phase
 audit `validate-code.md` prescribes — build the traceability matrix (NOT in
 scope excluded, external state marked UNVERIFIABLE with its manual check),
 deep-validate every item including the pre-landing critical pass and the
-scope-fidelity check, fix/fill/improve the implementation (complete what the
-executor left partial, simplify what it over-built without cutting
-coverage), re-run build/tests/linters and `VERIFY_CMD` until green, run the
+scope-fidelity check, fix and fill the implementation (complete what the
+executor left partial), refactor every footprint file to production grade and
+pass the staff-review gate (LAW 7 — simplify what it over-built without
+cutting coverage), re-run build/tests/linters and `VERIFY_CMD` until green, run the
 production cleanup sweep (tear down every generated test/mock/stub after it
 has served as proof — the plan's `## Test deliverables` names the only
 generated survivors — polish every touched file to the zero-comment
@@ -258,11 +277,14 @@ production standard, pass the `.gitignore`/`.plan` repo hygiene gate, and
 re-verify after it — LAW 5), then deliver the Phase-6 report. The report's final line must be exactly:
 
 ```
-VALIDATION COMPLETE — {N} plan items verified, {F} fixed, {G} gaps filled, {C} files production-cleaned, {S} scaffolding files removed.
+VALIDATION COMPLETE — {N} plan items verified, {F} fixed, {G} gaps filled, {R} improvements made, {C} files production-cleaned, {S} scaffolding files removed.
 ```
 
-(`N`, `F`, `G`, `C`, `S` are the counts from the actual audit — never
-fabricated. `C` counts the files swept in Phase 5; a footprint already clean
+(`N`, `F`, `G`, `R`, `C`, `S` are the counts from the actual audit — never
+fabricated. `R` counts the Phase 3b/3c refactors and improvements actually
+applied, each listed in the report with the property it improved; `0` is only
+legitimate when the report defends, file by file, why the executor's code
+already met the bar. `C` counts the files swept in Phase 5; a footprint already clean
 still counts as swept — the sweep ran, that is what `C` attests. `S` counts
 the generated test/mock/stub files deleted in the Phase 5a teardown; `0` is a
 legitimate value when the work needed no scaffolding, but it must be the
