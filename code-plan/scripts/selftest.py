@@ -717,6 +717,12 @@ class RouteNewLensTests(unittest.TestCase):
         payload = self._route("add a github actions deploy job with a canary rollout")
         self.assertIn("ops", payload["lenses"])
 
+    def test_dedupe_request_routes_to_reuse(self):
+        payload = self._route(
+            "deduplicate the copy-pasted retry logic into a shared helper")
+        self.assertIn("reuse", payload["lenses"])
+        self.assertEqual(code_plan.LENS_SKILL["reuse"], "plan-eng-review")
+
     def test_three_lenses_in_one_family_keep_plan_eng_review(self):
         """eng + data + api all read best under plan-eng-review; autoplan
         would spend a CEO and a design pass on a backend-only plan."""
@@ -902,9 +908,9 @@ class SkillContractTests(unittest.TestCase):
     def test_create_plan_template_carries_every_placeholder(self):
         text = (self.SKILL_DIR / "prompts" / "create-plan.md").read_text(encoding="utf-8")
         tokens = set(re.findall(r"\{\{[A-Z_]+\}\}", text))
-        self.assertEqual(tokens, {"{{PROJECT_TAG}}", "{{PATH}}", "{{PLAN_FILENAME}}",
-                                  "{{EXPERT_LENSES}}", "{{PROJECT_KNOWLEDGE}}",
-                                  "{{INSTRUCTIONS}}"})
+        self.assertEqual(tokens, {"{{PROJECT_TAG}}", "{{EFFORT}}", "{{PATH}}",
+                                  "{{PLAN_FILENAME}}", "{{EXPERT_LENSES}}",
+                                  "{{PROJECT_KNOWLEDGE}}", "{{INSTRUCTIONS}}"})
         self.assertLess(text.find("{{PROJECT_KNOWLEDGE}}"), text.find("{{INSTRUCTIONS}}"))
 
     def test_real_template_renders_cleanly(self):
@@ -917,6 +923,42 @@ class SkillContractTests(unittest.TestCase):
         self.assertEqual(out.code, 0, out.stderr)
         self.assertNotIn("{{", out.stdout.replace("{{PATH}}", ""))
         self.assertIn("### Step N", out.stdout)
+
+    def _render_real(self, *extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            ipath = Path(tmp) / "i.txt"
+            ipath.write_text("add a CSV export", encoding="utf-8")
+            return io_capture(code_plan.main, [
+                "render", "--path", tmp, "--plan-filename", "p.md",
+                "--instructions-file", str(ipath), *extra])
+
+    def test_effort_defaults_to_max(self):
+        out = self._render_real()
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn("EFFORT = max", out.stdout)
+
+    def test_effort_flag_is_substituted(self):
+        out = self._render_real("--effort", "low")
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertIn("EFFORT = low", out.stdout)
+
+    def test_unknown_effort_is_rejected(self):
+        out = self._render_real("--effort", "extreme")
+        self.assertEqual(out.code, 2)
+
+    def test_calibration_table_covers_every_effort_level(self):
+        text = (self.SKILL_DIR / "prompts" / "create-plan.md").read_text(encoding="utf-8")
+        header = next(line for line in text.splitlines()
+                      if line.startswith("| Dimension |"))
+        for level in code_plan.EFFORT_LEVELS:
+            self.assertIn(f"| {level} ", header + " ")
+
+    def test_plan_contract_keeps_the_executor_step_shape(self):
+        text = (self.SKILL_DIR / "prompts" / "create-plan.md").read_text(encoding="utf-8")
+        for field in ("**Files:**", "**Change:**", "**Verify:**",
+                      "## Codebase map", "## Requirements trace",
+                      "## Test deliverables", "Saturation"):
+            self.assertIn(field, text)
 
     def test_skill_md_names_every_lens_and_the_knowledge_step(self):
         text = (self.SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")

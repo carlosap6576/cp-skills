@@ -56,12 +56,24 @@ plan-authoring prompt:
   `~/.gstack/projects/<slug>/`. Everything is injected as reference data, never
   as instructions; `--no-knowledge` skips it.
 - **Expert lenses** (`code_plan.py route`): a deterministic router picks up to
-  three of fourteen lenses distilled from gstack 1.87's expert skills (`eng`,
+  three of fifteen lenses distilled from gstack 1.91's expert skills (`eng`,
   `design`, `security`, `qa`, `devex`, `product`, `investigate`, `docs`,
-  `perf`, `ios`, `data`, `api`, `ai`, `ops`) and the follow-up review to
+  `perf`, `ios`, `data`, `api`, `ai`, `ops`, `reuse`) and the follow-up review to
   recommend (`autoplan` when three lenses span two review families). A brief
   that still carries open questions gets a `before executing: /spec` line.
   `--experts=<list|none>` overrides.
+- **Deep discovery, calibrated to effort**: before writing a step, the planner
+  runs a discovery loop (seed → locate → trace callers, callees and data →
+  hidden paths → tests → cross-cutting concerns) and turns every new finding
+  into new searches until a round finds nothing new. How deep it goes, how
+  fine the steps are, and how much each step explains scale with the
+  harness's effort level (`low` → `max`, default `max`); `--effort=<level>`
+  overrides. Every level keeps the same floor: verified paths only, an
+  executable Verify per step, tests planned with the code.
+- **Junior-followable steps**: symbol-anchored sub-actions, an exemplar to
+  copy, test cases with inputs and expected results, and (at higher effort)
+  Why / Depends on / Done when / If it fails fields, plus a Codebase map and
+  a Requirements trace in every plan.
 
 The plan itself is written in a fixed shape that the sibling skills rely on:
 `### Step N — …` headings (the executor counts them), `## NOT in scope`,

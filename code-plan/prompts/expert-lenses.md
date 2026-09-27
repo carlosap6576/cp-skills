@@ -6,7 +6,7 @@ across gstack releases even as the skills' procedures evolve. Selection is
 routed against the deterministic `route` subcommand (the baseline); this file
 only supplies the lens content for the shortlisted experts.
 
-Verified against gstack 1.87.4.0 by hand (every plan-tier and post-tier skill
+Verified against gstack 1.91.2.0 by hand (every plan-tier and post-tier skill
 read in full, including their on-demand `sections/*.md`). Lens ids and skill
 names here MUST stay in sync with SIGNALS / LENS_SKILL in
 scripts/code_plan.py (enforced by selftest RoutingTableConsistencyTests).
@@ -45,8 +45,9 @@ gates `/ship`.
   already solves part of it, and plan the minimum set of changes that cleanly
   expresses the whole change. Once scope is set, commit; never silently
   reduce it later.
-- Complexity smell: 8+ files touched or 2+ new classes/services needs a
-  one-line justification or a simpler design. "Is this solving a real problem
+- Complexity gate: 8+ files touched or 2+ new classes/services makes
+  `/plan-eng-review` STOP before its architecture section and ask each cut or
+  deferral separately — give it a one-line justification or a simpler design. "Is this solving a real problem
   or one we created?" (essential vs accidental complexity).
 - Boring by default: proven patterns over novel ones; you get about three
   innovation tokens per project, spend them deliberately. Strangler-fig and
@@ -57,6 +58,13 @@ gates `/ship`.
   over a picker library) → already-installed dependency. Never add a
   dependency for what a few lines cover; no abstraction with one
   implementation, no factory with one product, no config nobody sets.
+- Shared code needs proof, not resemblance (gstack ≥ 1.89 rubric, shared by
+  `/plan-eng-review` and `/review`): extract only with ≥ 2 verified
+  first-party callers (a proposed caller is an assumption and must be
+  labelled one), a small option-free helper with a named destination and
+  contract, shared-contract tests plus per-caller integration tests, and
+  savings counted as removed − added. Similar-looking code alone is never a
+  reason; the full rubric is the `reuse` lens.
 - 100% of new codepaths get tests planned in the same step as the code,
   including error paths, guard clauses, and boundary values (zero, empty,
   nil, max, single element, unicode); never deferred to a follow-up. Flows
@@ -65,6 +73,11 @@ gates `/ship`.
   prompt or tool-definition changes get an eval.
 - Regression iron rule: any regression risk the plan identifies gets a test
   in the plan as a critical requirement, not a suggestion.
+- Coverage is mapped from code, not from the diff (gstack ≥ 1.87.6): the
+  plan's test step names the concrete source and test files per changed
+  public function, so the review's `[OK]`/`[GAP]` diagram — drawn only after
+  reading those files — has one root per function and nothing to guess.
+  Quality bar: ★★★ behavior + edge + error, ★★ happy path, ★ smoke.
 - For each new codepath name one realistic production failure (timeout, nil,
   race, stale data, partial write, duplicate delivery) and the step that
   handles it. No test AND no error handling AND silent = critical gap.
@@ -89,7 +102,7 @@ gates `/ship`.
 **Follow-up:** plan-tier `/plan-eng-review`; post-implementation `/review`
 (testing + maintainability always run on 50+ changed lines; simplification is
 advisory over 100 lines; red team self-activates over 200 lines or on any
-CRITICAL finding).
+CRITICAL finding; the shared-code check runs on every diff, any size).
 
 ## design — UI/UX (`/plan-design-review`, `/design-consultation`)
 
@@ -103,7 +116,15 @@ layout, or user-facing interaction flows.
 - Match the product's existing design system exactly. When `DESIGN.md`
   exists, cite its tokens by path (`{colors.primary}`, `{spacing.md}`) and
   never invent a parallel visual language; when none exists, say so in
-  Context and recommend `/design-consultation` before the UI steps.
+  Context and recommend `/design-consultation` before the UI steps (it
+  writes `DESIGN.md` only after its final approval; in plan mode it emits a
+  `## Proposed DESIGN.md` section instead). A `PRODUCT.md` counts as product
+  context for every design skill.
+- Plan against the mechanical detector: `/design-review`, `/design-html` and
+  `/review`'s design pass scan changed frontend files for anti-patterns
+  (tiers AUTO-FIX / NEEDS INPUT / POSSIBLE). `.impeccable/config*.json`
+  ignores are honored, but a diff that adds ignores for patterns it
+  introduces is itself a finding — design the pattern out instead.
 - Every interactive state is planned, per feature: LOADING, EMPTY, ERROR,
   SUCCESS, PARTIAL, plus what the user SEES in each. Empty states are
   features (warmth + primary action + context); "No items found." is not a
@@ -140,10 +161,13 @@ layout, or user-facing interaction flows.
   debug tagging section of the plan prompt).
 
 **Follow-up:** plan-tier `/plan-design-review` (mockup-first; scores 7
-passes 0–10 and edits the plan in place). Competing directions →
-`/design-shotgun`; a finished mockup that needs a page → `/design-html`.
-Post-implementation `/design-review` (screenshot-driven, fixes in source) and
-`/review --design`.
+passes 0–10 and edits the plan in place). No design system yet →
+`/design-consultation`; competing directions → `/design-shotgun` (3 variants
+by default, up to 8, feedback board); a finished mockup that needs a page →
+`/design-html` (Pretext-native output, one detector slop-gate pass).
+Post-implementation `/design-review` (screenshot-driven, fixes in source with
+one atomic commit per fix, needs a clean tree, stops above a 20% risk budget
+or 30 fixes) and `/review --design`.
 
 ## security — threat surface (`/cso`)
 
@@ -187,11 +211,17 @@ or anything network-facing.
 - Audit logging for sensitive operations; data classified (restricted /
   PII / confidential / internal / public) with its retention and deletion
   path named.
+- No blanket exclusions: dev dependencies, DoS, historical secrets and
+  prompt injection are all in scope for the audit; unknown reachability is
+  stated as unknown, never assumed safe.
 
 **Follow-up:** plan-tier `/plan-eng-review` (security architecture section).
 Post-implementation `/review --security` (never auto-gated off) and `/cso`
-(static audit; `--diff` for the branch, `--comprehensive` when reproduction
-and repair candidates are wanted).
+(evidence-first audit; `--diff` for the branch, one of `--code` / `--infra` /
+`--skills` / `--supply-chain` / `--owasp` / `--scope <domain>` to focus it,
+`--comprehensive` for sandboxed reproduction and up to 3 repair candidates).
+`/ship`'s opt-in pre-push credential scan is bound to the actual push
+destination and blocks on content it cannot scan.
 
 ## qa — verification & test design (`/qa`, `/qa-only`)
 
@@ -232,7 +262,11 @@ existing behavior are plausible, or when the instructions ask for tests.
 
 **Follow-up:** post-implementation `/qa` (browser QA that fixes, diff-aware
 on a feature branch, `--quick` / standard / `--exhaustive`) or `/qa-only`
-(report only); `/review --testing`.
+(report only, never reads source; `--regression <baseline.json>` compares
+against a saved run); `/review --testing`. Signed-in flows need
+`/setup-browser-cookies` first (it reports copied cookies and verified
+sign-in separately). `/ship`'s coverage gate uses CLAUDE.md
+`## Test Coverage` Minimum/Target, else 60% / 80%.
 
 ## devex — developer experience (`/plan-devex-review`)
 
@@ -321,7 +355,10 @@ goals or ask to "think bigger".
 rescue map, security, observability, deployment, trajectory) followed by the
 required `/plan-eng-review`; `/autoplan` runs CEO → Design → DX → Eng with
 one approval gate. Pre-planning, when the idea is not yet validated:
-`/office-hours`.
+`/office-hours` (hard gate: no code, output is a design doc the plan cites);
+when the requirement is ambiguous: `/spec --no-execute` (without that flag,
+outside plan mode, `/spec` files the issue AND spawns an implementation run
+in a fresh worktree).
 
 ## investigate — root cause (`/investigate`)
 
@@ -349,7 +386,8 @@ or "X stopped working": anything where the cause is not yet proven.
   findings go under "NOT in scope" with a reason.
 
 **Follow-up:** `/investigate` when the cause is still unknown at planning
-time; plan-tier `/plan-eng-review` once the cause is proven;
+time (it scope-locks the affected directory with `/freeze` and releases the
+lock when done); plan-tier `/plan-eng-review` once the cause is proven;
 post-implementation `/qa` (regression test) and `/review`.
 
 ## docs — documentation (`/docs-refresh`, `/document-generate`)
@@ -375,7 +413,9 @@ guides / API reference, or ships a feature whose docs must move with it.
   of files.
 
 **Follow-up:** `/docs-refresh` for existing docs, `/document-generate` for
-missing ones, `/document-release` after shipping.
+missing ones (Diátaxis types; commits and pushes under its own contract),
+`/document-release` after shipping (coverage map of the diff, edits never
+regenerates CHANGELOG voice, asks before any VERSION bump).
 
 ## perf — performance (`/plan-eng-review`, `/benchmark`)
 
@@ -403,7 +443,9 @@ the instructions name a performance budget.
 
 **Follow-up:** plan-tier `/plan-eng-review`; post-implementation
 `/review --performance` and `/benchmark` (`--baseline` before, `--diff`
-after, for web pages).
+after, `--trend` over time, for web pages; timing +20% warns, +50% or
++500ms regresses). LLM model choice → `/benchmark-models` (same prompt across
+Claude / GPT / Gemini, latency, tokens, cost).
 
 ## ios — Apple platforms (`/ios-qa`, `/ios-design-review`, `/ios-fix`)
 
@@ -421,9 +463,15 @@ App Store delivery.
   guards or separate targets, never a shipped debug path.
 - Distribution is scope: signing, TestFlight, App Store metadata, and the
   minimum-OS decision are plan items or an explicit "NOT in scope".
+- The gstack debug bridge is tooling, not product: `/ios-qa` installs a
+  DebugBridge package behind `#if DEBUG`; plan `/ios-clean` before a release
+  build and `/ios-sync` after a gstack upgrade regenerates the bridge.
 
 **Follow-up:** plan-tier `/plan-eng-review`; post-implementation `/ios-qa`
-(live device QA), `/ios-design-review`, `/ios-fix`.
+(live device QA over a USB tunnel; needs Xcode, Swift ≥ 5.9 and a real
+iPhone), `/ios-design-review` (HIG + DESIGN.md, scored 0–10, read-only),
+`/ios-fix` (fix → rebuild → verify on device, commits a regression test,
+stops after 3 iterations); `/ios-clean` before release.
 
 ## data — schema, migrations & data safety (`/plan-eng-review`, `/review --data-migration`)
 
@@ -559,9 +607,61 @@ cron/schedulers, or how the system is deployed and rolled back.
   letters), and observable; "silently failing background job" is the failure
   to plan against.
 
+- Landing is evidence-bound (gstack ≥ 1.90.2): `/land-and-deploy` binds
+  approval to the exact repo, PR, head and base branch (a changed head or
+  base voids it), accepts only CURRENT diff reviews and fresh test
+  evidence, and never treats HTTP 200 or a healthy old page as proof the new
+  revision deployed. A staging-before-production requirement stops before
+  merge with a pipeline hand-off — so the plan names the deploy trigger,
+  revision input, production hold and promotion approval, or schedules
+  `/setup-deploy` to record them in CLAUDE.md `## Deploy Configuration`.
+- Post-deploy canary thresholds to plan against: page failure CRITICAL, new
+  console errors HIGH, load > 2× baseline MEDIUM, new 404s LOW, each only
+  after 2+ consecutive checks; capture a `/canary --baseline` before deploy.
+
 **Follow-up:** plan-tier `/plan-eng-review` (deployment section);
 post-implementation `/review` (distribution & CI/CD category), `/cso
---supply-chain` or `--infra`, then `/land-and-deploy` and `/canary`.
+--supply-chain` or `--infra`, then `/land-and-deploy` and `/canary`
+(`/setup-deploy` first when CLAUDE.md has no deploy configuration;
+`/landing-report` when several branches race for the next VERSION slot).
+
+## reuse — shared code & duplication (`/plan-eng-review`, `/deslop-shared-libs`)
+
+**Select when:** the task deduplicates code, extracts or consolidates a
+shared helper/library, fixes the same bug in several places, or adds code
+that plausibly repeats logic already in the repo.
+
+- Prove the callers: at least 2 verified first-party authored source
+  locations (file, function, line) need the shared behavior; a proposed
+  caller is allowed only as a labelled assumption. Similar names or
+  formatting are not evidence; generated and vendored copies never count as
+  callers or savings (trace them to their template instead).
+- Reuse before extracting: check existing helpers and libraries first and
+  compare behavior, inputs/outputs, errors, side effects, security,
+  dependencies and runtime/deploy boundaries. Never bridge languages or
+  isolated deployments without a practical shared contract.
+- Keep the helper small: name its destination, contract, the callers to
+  migrate and the smallest adoption sequence; no option-heavy helpers.
+- Test the contract and every migration: shared-contract tests (behavior,
+  errors, side effects, boundaries) plus an integration test per migrated
+  caller, and state the blast radius of a bug in the shared code.
+- Account for the whole change: savings = removed − added (moved code counts
+  on both sides), implementation reported apart from tests and integration,
+  ranges when uncertain; say so when tests make the change net-positive.
+- Rank by reliability gain and net savings, then low adoption risk; reject
+  incompatible contracts and abstractions the benefit does not justify.
+  "None worthwhile" is a valid outcome.
+- Extraction is advice, not a defect: reviews ask before applying it and it
+  never lowers the score or blocks a clean result — but divergent copies that
+  already produce a wrong result are defects and are fixed in this plan.
+
+**Follow-up:** plan-tier `/plan-eng-review` (its code-quality section applies
+this rubric to proposed callers); post-implementation `/review` (checks every
+diff, advisories are ASK-only) and `/review --maintainability` (duplicated
+behavior with demonstrated defects). For a repo-wide opportunity sweep before
+planning: `/deslop-shared-libs` (read-only; 14 UTC days of commits and PRs,
+up to 5 opportunities and 3 ranked recommendations, PR-covered work listed
+separately; never edits).
 
 ---
 
@@ -625,24 +725,67 @@ keep `plan-eng-review`.
 | api | plan-eng-review |
 | ai | plan-eng-review |
 | ops | plan-eng-review |
+| reuse | plan-eng-review |
 
 (3 lenses spanning 2+ families → `autoplan`)
 
 Post-implementation experts the plan's "Experts & Tooling" section may name,
-by what the steps touch (all present in gstack 1.87.4.0): `/review` with its
+by what the steps touch (all present in gstack 1.91.2.0): `/review` with its
 force flags (`--security --performance --testing --maintainability
 --data-migration --api-contract --design --simplification --all-specialists`),
 `/qa` / `/qa-only`, `/cso`, `/design-review`, `/devex-review`, `/benchmark`,
-`/health`, `/investigate`, `/document-release`, `/land-and-deploy`, `/canary`,
-`/ship`, `/diagram` (renders a plan's mermaid fences to an editable triplet),
-`/learn` (records durable project learnings), `/codex` (an outside-model
-second opinion on a plan or diff).
+`/health`, `/investigate`, `/document-release`, `/deslop-shared-libs`,
+`/land-and-deploy`, `/canary`, `/ship`, `/diagram` (renders a plan's mermaid
+fences to an editable triplet), `/learn` (records durable project
+learnings), `/codex` (an outside-model second opinion on a plan or diff).
+
+### Full gstack roster — where each expert sits relative to a plan
+
+Every installed gstack skill, so the hand-off never misses one. Tier: **pre**
+(before planning), **plan** (reviews the plan), **post** (acts on the
+implementation), **land** (merges/deploys), **setup** (one-time
+prerequisite), **util** (session tooling; never a `next:` line on its own).
+
+| Skill | Tier | Name it in the plan when |
+|---|---|---|
+| `/office-hours` | pre | The idea's worth is unproven; produces the design doc the plan cites |
+| `/spec` | pre | Requirements are ambiguous; use `--no-execute` for spec-only |
+| `/deslop-shared-libs` | pre / post | A refactor or dedupe needs evidence of real shared-code opportunities |
+| `/design-consultation` | pre | UI work ahead and no `DESIGN.md` |
+| `/design-shotgun` · `/design-html` | pre | Competing visual directions · approved mockup to production HTML |
+| `/plan-ceo-review` · `/plan-eng-review` · `/plan-design-review` · `/plan-devex-review` | plan | Per the Known follow-up skills table |
+| `/autoplan` | plan | Three lenses spanning two review families |
+| `/codex` | plan / post | Cross-model second opinion (`review`, `challenge`, consult; read-only) |
+| `/review` | post | Always, after validation; force flags per lens |
+| `/qa` · `/qa-only` | post | User-observable web behavior (fixes · report only) |
+| `/cso` | post | Security-relevant surface |
+| `/design-review` | post | UI changed |
+| `/devex-review` | post | CLI, SDK, tooling, install flows |
+| `/benchmark` | post | Web performance target |
+| `/benchmark-models` | post | Model choice or LLM cost/latency trade-off |
+| `/health` | post | Quality baseline or trend (read-only composite score) |
+| `/investigate` | pre / post | Cause unknown |
+| `/ios-qa` · `/ios-design-review` · `/ios-fix` | post | iOS behavior, design, device-verified fixes |
+| `/ios-clean` · `/ios-sync` | post | Strip the debug bridge before release · regenerate it after a gstack upgrade |
+| `/document-release` · `/document-generate` | post | Docs moved with behavior · docs missing entirely |
+| `/diagram` · `/make-pdf` | util | Render plan diagrams · export a plan or report as PDF |
+| `/ship` | land | Validated and ready for a PR (runs git, bumps VERSION) |
+| `/landing-report` | land | Several branches racing for the next VERSION slot (read-only) |
+| `/land-and-deploy` · `/canary` | land | Merge, deploy and verify · post-deploy monitoring |
+| `/setup-deploy` | setup | `/land-and-deploy` is planned and CLAUDE.md has no deploy configuration |
+| `/setup-browser-cookies` | setup | QA must run behind a sign-in |
+| `/setup-gbrain` · `/sync-gbrain` | setup | Code search memory for agents (per-repo trust policy · refresh) |
+| `/learn` · `/retro` | util | Record or prune durable learnings · periodic retrospective (harvests shortcut markers) |
+| `/context-save` · `/context-restore` | util | Hand a long plan across sessions |
+| `/careful` · `/freeze` · `/guard` · `/unfreeze` | util | Guardrails around destructive or out-of-scope edits |
+| `/browse` · `/scrape` · `/skillify` · `/pair-agent` · `/open-gstack-browser` · `/connect-chrome` | util | Browser tooling; not plan follow-ups |
+| `/plan-tune` · `/gstack-upgrade` | util | gstack's own question tuning and upgrades |
 
 ---
 
 ### gstack hand-off contract notes
 
-Behavioral facts about the follow-up skills, verified against gstack 1.87.4.0
+Behavioral facts about the follow-up skills, verified against gstack 1.91.2.0
 by hand; the live snapshot in `prompts/gstack-contract.md` supersedes any
 version-specific detail here. These change how a chained review behaves — not
 which skill is recommended:
@@ -715,6 +858,18 @@ which skill is recommended:
   was skipped, what to watch" plus "No durable learnings this session" is
   expected, not noise. Learnings land in `~/.gstack/projects/<slug>/
   learnings.jsonl`; code-plan's Step 8 reads them back on the next run.
+- **Shared-code advice is separate from defects (gstack ≥ 1.89).** `/review`
+  runs the shared-code check on every diff (even under 50 lines) and emits
+  extractions as `[ADVISORY]` rows that are ASK-only, never auto-applied, and
+  excluded from the score and clean status. `/plan-eng-review` asks each
+  extraction as its own decision — approving the plan's scope does not
+  approve an extraction. A plan that already decides its extractions (with
+  rubric evidence) under "Decisions to record" leaves nothing to re-ask.
+- **`/ship` makes no WIP checkpoint commits (gstack ≥ 1.89.1)** and stops
+  before release prep when a dispatched reviewer failed; late fixes go back
+  through fresh tests and review. Its review-fix loop is bounded at 3 cycles.
+- **`/freeze` boundaries persist until `/unfreeze` (gstack ≥ 1.89)** —
+  ending the session no longer clears them.
 - **A chained skill that asks no question is not broken** — gstack's 1.62+
   preamble allows a skill to resolve its own gate question silently, and a
   spawned/headless session auto-chooses the recommended option.

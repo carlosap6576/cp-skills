@@ -260,14 +260,16 @@ def cmd_plan_path(args: argparse.Namespace) -> int:
 #     "Known follow-up skills" table in prompts/expert-lenses.md.
 
 LENS_PRIORITY = ["investigate", "security", "eng", "data", "api", "design",
-                 "devex", "ai", "qa", "perf", "ops", "docs", "product", "ios"]
+                 "devex", "ai", "qa", "perf", "reuse", "ops", "docs", "product",
+                 "ios"]
 
 # Lens → the gstack skill to recommend as the plan-tier follow-up. Several
 # lenses share `plan-eng-review` on purpose: gstack's plan-tier reviewers are
 # eng / design / ceo / devex (+ cso, qa, investigate, docs-refresh), and the
 # eng manager review is the right reader for data, API, AI, ops, perf and iOS
-# plans. Post-implementation experts (/review --data-migration, /cso, /qa,
-# /benchmark, /canary …) are named inside the plan's "Experts & Tooling"
+# plans, and for reuse (gstack's shared-code rubric lives in its code-quality
+# section). Post-implementation experts (/review --data-migration, /cso, /qa,
+# /benchmark, /deslop-shared-libs, /canary …) are named inside the plan's "Experts & Tooling"
 # section by the lens content, not here.
 LENS_SKILL = {
     "design": "plan-design-review",
@@ -284,6 +286,7 @@ LENS_SKILL = {
     "api": "plan-eng-review",
     "ai": "plan-eng-review",
     "ops": "plan-eng-review",
+    "reuse": "plan-eng-review",
 }
 
 SIGNALS = {
@@ -353,6 +356,12 @@ SIGNALS = {
             "metrics", "cron", "scheduler", "env var", "environment variable",
             "vercel", "lambda", "serverless", "aws", "gcp", "azure",
             "health check", "uptime", "on-call", "incident"],
+    "reuse": ["duplicate code", "duplicated code", "duplication", "dedupe",
+              "deduplicate", "shared helper", "shared library", "shared code",
+              "shared module", "extract a helper", "extract helper",
+              "extract into", "consolidate", "copy-paste", "copy-pasted",
+              "copy paste", "reuse", "common helper", "same logic",
+              "repeated fix", "deslop"],
 }
 
 MAX_LENSES = 3
@@ -837,6 +846,12 @@ def cmd_knowledge(args: argparse.Namespace) -> int:
 # `render` — placeholder substitution
 # ---------------------------------------------------------------------------
 
+# The harness's reasoning-effort levels. The plan prompt's calibration table is
+# keyed on these ids; `max` is the default because planning is the deep-thinking
+# stage of the pipeline.
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+DEFAULT_EFFORT = "max"
+
 def cmd_render(args: argparse.Namespace) -> int:
     template_path = Path(args.template)
     instructions_path = Path(args.instructions_file)
@@ -871,6 +886,7 @@ def cmd_render(args: argparse.Namespace) -> int:
     # a literal {{PATH}} cannot be re-substituted by the PATH replacement.
     out = template
     out = out.replace("{{PROJECT_TAG}}", args.tag or "ui-data")
+    out = out.replace("{{EFFORT}}", args.effort or DEFAULT_EFFORT)
     out = out.replace("{{PATH}}", args.path or "")
     out = out.replace("{{PLAN_FILENAME}}", args.plan_filename or "")
 
@@ -1012,6 +1028,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="path to create-plan.md (default: {skill_dir}/prompts/create-plan.md)")
     sp.add_argument("--tag", default="ui-data",
                     help="data-* debug tag (default: ui-data — the skill never prompts for it)")
+    sp.add_argument("--effort", default=DEFAULT_EFFORT, choices=EFFORT_LEVELS,
+                    help="harness reasoning-effort level for the calibration "
+                         f"table (default: {DEFAULT_EFFORT})")
     sp.add_argument("--lenses-file", default=None,
                     help="file with the expert-lens block for {{EXPERT_LENSES}}; omitted → generalist default")
     sp.add_argument("--knowledge-file", default=None,

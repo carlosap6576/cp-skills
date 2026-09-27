@@ -460,6 +460,14 @@ class DocsContractTests(unittest.TestCase):
                            "red-team", "--all-specialists"):
             self.assertIn(specialist, text, f"missing specialist: {specialist}")
 
+    def test_experts_file_covers_the_shared_code_tier(self):
+        """gstack 1.89 split shared-code advice from defects; the roster must
+        carry /deslop-shared-libs and the ASK-only advisory contract."""
+        text = (self.SKILL_DIR / "prompts" / "gstack-experts.md").read_text(
+            encoding="utf-8")
+        self.assertIn("`/deslop-shared-libs`", text)
+        self.assertIn("[ADVISORY]", text)
+
     def test_versions_in_lockstep(self):
         import json
         import re

@@ -24,6 +24,7 @@ Follow these rules strictly:
 - Execute the plan step by step, in the exact order written. Steps are the `### Step N — …` headings.
 - Before each step, print a single line: `[STEP n/total] <short step name>`.
 - Complete and verify each step before starting the next. Never batch or reorder steps.
+- Use every field a step carries: **Pattern to follow** is the exemplar to mirror, **Depends on** must already be done, **Done when** is part of that step's verification, and **If it fails** is where to look first. The plan's **Codebase map** lists the files, conventions, and unknowns the steps rely on; read it before Step 1.
 
 3. OUTPUT DISCIPLINE (token efficiency)
 - No summaries of the plan, no restating requirements, no explanations of what you are about to do.

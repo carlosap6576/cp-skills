@@ -1,6 +1,6 @@
 ---
 name: code-execute
-version: "1.5.0"
+version: "1.6.2"
 description: "Execute an implementation plan from a file path. -p/--path points at an existing plan .md; when omitted, STRICT auto-discovery looks in the .plan folder at the repo root — exactly one plan there is executed, otherwise the skill STOPS and tells the user to pass -p (no prompting, no guessing). Runs the plan step-by-step from the repo root that contains it as a staff-level implementer: reads the repo's declared verify command, DESIGN.md and gstack's recorded pitfalls first, climbs the reuse ladder before writing anything new, ships every authored line production-clean, and runs the final verification after the last edit. Never edits the plan file, never runs git. --skill=<skill> chains a follow-up skill (e.g. --skill=validate runs /code-validation on the same plan) after execution completes; otherwise an expert-aware next-step recommendation is printed (gstack roster in prompts/gstack-experts.md: /review specialists + force flags, /qa, /cso, /design-review, /devex-review, /benchmark, /document-release, …). Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.execute.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat."
 argument-hint: 'code-execute [-p skills/plans/<plan>.md] [--skill=validate|review|qa]'
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill
@@ -327,7 +327,7 @@ Rules for this step:
   run** before chaining. A chained-skill failure must never cost the user
   their executed work — report it in ONE line ("`/{name}` isn't available —
   implementation is complete, run it manually") and stop; do not retry.
-- **gstack contract notes (verified against gstack 1.87.4.0; details in
+- **gstack contract notes (verified against gstack 1.91.2.0; details in
   `prompts/gstack-experts.md`):** a chained skill may resolve its own gate
   questions silently when the target is named in `args` (≥ 1.62) — asking
   nothing is not broken. `/review` dispatches its specialist subagents

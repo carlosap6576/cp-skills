@@ -42,7 +42,7 @@ For every item in the matrix, verify precisely — do not assume, confirm by rea
 
 ## Phase 4 — Verify Everything Works
 
-After all fixes: re-run the full build, test suite, linters, and type checks, plus the repo's declared verify command when CLAUDE.md declares one. All must pass. If anything fails, keep fixing until it passes. Perform a final end-to-end sanity trace of the primary user flows described in the plan and its loudest negative case. Every Verify line in the plan is re-run as written (or the closest executable equivalent, stated).
+After all fixes: re-run the full build, test suite, linters, and type checks, plus the repo's declared verify command when CLAUDE.md declares one. All must pass. If anything fails, keep fixing until it passes. Perform a final end-to-end sanity trace of the primary user flows described in the plan and its loudest negative case. Every Verify line in the plan is re-run as written (or the closest executable equivalent, stated), every **Done when** condition is confirmed, and every row of the plan's **Requirements trace** is checked against the code that implements it.
 
 ## Phase 5 — Production Cleanup Sweep (mandatory — runs AFTER Phase 4 is green)
 

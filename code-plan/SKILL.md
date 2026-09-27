@@ -1,9 +1,9 @@
 ---
 name: code-plan
-version: "1.14.0"
-description: "Turn a rough request into a precise, step-by-step implementation plan. One-shot: --desc/-d alone runs with zero prompts — the plan saves to a git-ignored .plan/ folder at the repo root (auto-created, .gitignore validated/updated every run); --path/-p overrides the destination. Learns the project first (repo verify commands, CLAUDE.md/DESIGN.md/decision records, and gstack's durable learnings, decision ledger, CEO plans and design docs for this repo) and auto-selects gstack expert lenses (eng/design/security/qa/devex/product/investigate/docs/perf/ios/data/api/ai/ops) to sharpen the plan; recommends /spec or /office-hours first when the request is not yet plannable; --skill=<skill> chains a follow-up skill on the finished plan. Debug tag defaults to ui-data (never prompted). Rewrites the instructions natively (in the model running the skill — no external LLM); writes a detailed, human-executable .md plan another agent can execute. Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.plan.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat."
-argument-hint: 'code-plan | code-plan -d "add a CSV export button" [-p skills/plans] [--experts=eng,data] [--skill=plan-eng-review]'
-allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion, Skill
+version: "1.16.0"
+description: "Turn a rough request into a precise, step-by-step implementation plan. One-shot: --desc/-d alone runs with zero prompts — the plan saves to a git-ignored .plan/ folder at the repo root (auto-created, .gitignore validated/updated every run); --path/-p overrides the destination. Learns the project first (repo verify commands, CLAUDE.md/DESIGN.md/decision records, and gstack's durable learnings, decision ledger, CEO plans and design docs for this repo) and auto-selects gstack expert lenses (eng/design/security/qa/devex/product/investigate/docs/perf/ios/data/api/ai/ops/reuse) to sharpen the plan; runs a saturation-driven deep discovery of the codebase (seed → locate → trace callers/callees/data → hidden paths → tests → expand until no new file or symbol turns up) and writes junior-followable steps (symbol-anchored sub-actions, exemplar patterns, executable Verify lines, a codebase map and a requirements trace), with depth, granularity and tone calibrated to the harness effort level (low → max, default max; --effort overrides); recommends /spec or /office-hours first when the request is not yet plannable; --skill=<skill> chains a follow-up skill on the finished plan. Debug tag defaults to ui-data (never prompted). Rewrites the instructions natively (in the model running the skill — no external LLM); writes a detailed, human-executable .md plan another agent can execute. Every run ends by writing a machine-readable pipeline signal (.plan/.signals/<plan-stem>.plan.json, status success/failed) so external automation can drive the plan → execute → validate pipeline without parsing chat."
+argument-hint: 'code-plan | code-plan -d "add a CSV export button" [-p skills/plans] [--experts=eng,data] [--effort=max] [--skill=plan-eng-review]'
+allowed-tools: Bash, Read, Write, Glob, Grep, Agent, AskUserQuestion, Skill
 license: "Proprietary - All Rights Reserved (see LICENSE)"
 user-invocable: true
 metadata:
@@ -96,6 +96,9 @@ CODE_PLAN_PYTHON="$PY"
                                       eng,design) or disable them; default:
                                       auto-selected in Step 9, never prompted
 --no-knowledge                      → skip the project-knowledge pre-flight (Step 8)
+--effort=<level>                    → override the calibration level (low|medium|
+                                      high|xhigh|max); default: the harness's own
+                                      effort level, else max — never prompted
 ```
 
 **ONE-SHOT RULE: a description flag implies `--yes` whenever the path
@@ -117,8 +120,8 @@ prompt for the path when the `.plan` default applies.
 Split the raw argument string:
 - Anything after the first non-flag token is `INSTRUCTIONS` (free prose).
 - `--desc=…`/`--description=…`/`-d …`, `--path=…`/`-p …`, `--tag=…`,
-  `--skill=…`/`-s …`, `--experts=…`, `--no-enhance`, `--no-knowledge`, `--yes`
-  are flags; strip them from the prose. Long flags take `=`-joined values;
+  `--skill=…`/`-s …`, `--experts=…`, `--effort=…`, `--no-enhance`,
+  `--no-knowledge`, `--yes` are flags; strip them from the prose. Long flags take `=`-joined values;
   short flags (`-d`, `-p`, `-s`) take the next token (or quoted string) as
   their value. Values may be quoted (single or double) and contain spaces —
   take the quoted value verbatim.
@@ -232,6 +235,7 @@ deliberate. Render exactly this shape in chat:
   Save folder   skills/plans            (exists · writable)
   Plan file     2026-07-25-add-a-csv-export-button-plan.md   (provisional)
   Enhancement   on — native rewrite, you confirm the result first
+  Effort        max                     (harness level — override with --effort=…)
   Instructions  ────────────────────────────────────────────
   <the user's instructions verbatim — first 15 lines; if longer, add
    "… (+N more lines)">
@@ -357,10 +361,10 @@ baseline lens set, and you may adjust it by at most one lens.
    Empty/failed output → treat as `{"lenses": [], "recommended_skill": null,
    "pre_skill": null}`, print one line, continue (mirrors LAW 4's
    degrade-never-block stance).
-2. `lenses` from the JSON is the **BASELINE**. The fourteen lens ids are
+2. `lenses` from the JSON is the **BASELINE**. The fifteen lens ids are
    `eng`, `design`, `security`, `qa`, `devex`, `product`, `investigate`,
-   `docs`, `perf`, `ios`, `data`, `api`, `ai`, `ops`. You may add or drop
-   **at most one** lens, and only with a one-line justification shown in the
+   `docs`, `perf`, `ios`, `data`, `api`, `ai`, `ops`, `reuse`. You may add or
+   drop **at most one** lens, and only with a one-line justification shown in the
    Step 12 report (e.g. `Experts: eng+design (+design: the endpoint is only
    consumed by a new settings panel)`). The Step 8 knowledge is a legitimate
    reason to adjust (a `DESIGN.md` in the repo argues for `design`; a pitfall
@@ -397,7 +401,23 @@ In interactive runs (no one-shot), print one line before authoring:
 `Experts: none`). Never ask a question about it; `--experts` is the override
 mechanism.
 
-## Step 10 — Resolve the plan path and render
+## Step 10 — Resolve effort, the plan path, and render
+
+**Resolve `EFFORT`** (silent, never prompted) by the first rule that applies:
+
+1. `--effort=<level>` was passed → that level. Anything other than `low`,
+   `medium`, `high`, `xhigh`, `max` → one-line error and stop.
+2. The harness declares the reasoning-effort level this session runs at (a
+   `/effort` or `--effort` setting, a reasoning-effort value in the system
+   context) → map it to the nearest of the five ids.
+3. Otherwise → `max`. Planning is the deep-thinking stage of the pipeline;
+   when in doubt, spend the effort here, where it is cheapest.
+
+Remember where the level came from (`flag`, `harness`, or `default`) for the
+Step 12 report. The level scales discovery depth, step granularity and tone
+through the calibration table in the rendered prompt; it never changes the
+task's scope and never relaxes the plan's invariants.
+
 
 ```bash
 # USER_PATH is empty in the .plan-default case — plan-path re-resolves (and
@@ -411,7 +431,7 @@ KNOWLEDGE_ARG=""
 [ -s "$TMP/knowledge.md" ] && KNOWLEDGE_ARG="--knowledge-file $TMP/knowledge.md"
 
 "$CODE_PLAN_PYTHON" "$SKILL_DIR/scripts/code_plan.py" render \
-  --tag "$PROJECT_TAG" --path "$(dirname "$PLAN_FILE")" \
+  --tag "$PROJECT_TAG" --effort "$EFFORT" --path "$(dirname "$PLAN_FILE")" \
   --plan-filename "$(basename "$PLAN_FILE")" \
   $LENSES_ARG $KNOWLEDGE_ARG \
   --instructions-file "$TMP/enhanced.txt" > "$TMP/rendered-prompt.md"
@@ -420,13 +440,34 @@ KNOWLEDGE_ARG=""
 ## Step 11 — Execute the rendered prompt
 
 `Read` `$TMP/rendered-prompt.md` and **follow it as your instructions** (LAW 2).
-That means: read the project docs and gstack artifacts the knowledge block
-names, explore the codebase (Glob / Grep / Read — never reference a file you
-have not verified exists), walk the reuse ladder for every capability the
-task needs, then author the plan in the prompt's required shape (every step
-is a `### Step N — …` heading with Files / Change / Verify; `###` is used for
-nothing else) and `Write` it to `$PLAN_FILE`. Honor every rule in the
-rendered prompt, including "no git."
+That means:
+
+1. **Calibrate.** Apply the calibration row for `EFFORT` and the mode rules
+   (a `--skill=code-execute` chain counts as "chained straight into
+   execution": write at `xhigh` or deeper even when `EFFORT` is lower).
+2. **Discover deeply.** Read the project docs and gstack artifacts the
+   knowledge block names, then run the prompt's discovery loop — orient,
+   seed, locate, trace callers/callees/data, hunt hidden paths, map tests,
+   cross-cutting concerns — and expand every new finding into new searches
+   until saturation (or the round cap the calibration sets). Read files in
+   full before planning against them; record load-bearing findings,
+   negative searches, and unknowns in a ledger. Never reference a file,
+   symbol, or command you have not verified exists.
+3. **Fan out when it pays.** At `high` effort and above, independent
+   discovery areas may go to read-only exploration subagents (the Agent
+   tool). Treat their reports as leads: open the cited lines yourself before
+   the plan depends on them. Subagents never write, never run git.
+4. **Decide.** Walk the reuse ladder for every capability the task needs,
+   name the regression surface, draw the scope line.
+5. **Author.** Write the plan in the prompt's required shape — every step a
+   `### Step N — …` heading with Files / Change / Verify plus the optional
+   fields the calibration sets; `###` is used for nothing else; a Codebase
+   map and a Requirements trace — run the self-audit, fix what it finds,
+   and `Write` it to `$PLAN_FILE`.
+
+Honor every rule in the rendered prompt, including "no git" and read-only
+exploration. Keep the discovery tally (files read in full, searches run,
+whether the loop saturated) for Step 12.
 
 ## Step 12 — Report
 
@@ -437,6 +478,7 @@ Exactly this shape, nothing more:
 
 Plan written to {PLAN_FILE}{ · default .plan folder, git-ignored}
 {N} steps · tag `{PROJECT_TAG}` · {enhanced|raw} instructions · experts: {LENSES|none} · knowledge: {KNOWLEDGE}
+effort: {EFFORT} ({flag|harness|default}) · discovery: {F} files read · {S} searches · {saturated|capped at R rounds}
 {one-sentence summary of what the plan covers}
 before executing: /{PRE_SKILL} — {one-line why}   ← ONLY when the router set pre_skill
 next: /{RECOMMENDED} — {one-line why}   ← ONLY when --skill was NOT given and
@@ -452,7 +494,9 @@ wrote. `{enhanced|raw}` reflects whether the native rewrite was used.
 `{LENSES}` is the Step 9 selection **with its source stated**: `eng+data
 (routed)` (deterministic baseline, untouched), `eng+data (routed, +design:
 <why>)` (baseline with one model adjustment), `eng,design (forced)`
-(`--experts` override), or `none`. `{KNOWLEDGE}` is the tail of Step 8's
+(`--experts` override), or `none`. The `effort:` line states the calibration level and its source (Step 10) and
+the discovery tally from Step 11 — honest counts, not estimates.
+`{KNOWLEDGE}` is the tail of Step 8's
 `NOTE:` line (e.g. `verify command, DESIGN.md, gstack learnings` or `none
 found`; `skipped` with `--no-knowledge`). The `before executing:` line prints
 the router's `pre_skill` (or `/office-hours` per Step 9.4) — the plan exists,
@@ -586,6 +630,9 @@ Rules for this step:
 | `plan-path` exits 2 | Destination directory missing or not writable | Re-run with `--mkdir`, or pick a writable folder. |
 | `WARN: could not update .gitignore` | `.gitignore` unwritable in the `.plan` default case | The plan is still written to `.plan/`; add `.plan/` to `.gitignore` manually so plans stay out of commits. |
 | Plan saved to `.plan/` but I wanted another folder | No `-p` was passed, so the default applied | Re-run with `-p <dir>` — the flag always wins over the default. |
-| `route` exits 2: unknown expert lens | `--experts` named an id that is not one of the fourteen | Use ids from the error line (it lists every valid id) or drop the flag to route automatically. |
+| Plan feels thin or a step needs guessing | The run calibrated to a low effort level (harness or `--effort`) | Re-run with `--effort=max` (or raise the harness effort): discovery runs to saturation and every step gets its exemplar, done-when and failure hint. |
+| Planning takes long on a large repo | `max` effort runs discovery to saturation plus an adversarial pass | Expected for the default. For a quick draft pass `--effort=medium`; the invariants (verified paths, Verify lines, required shape) still hold. |
+| `render` exits 2 on `--effort` | The level is not one of `low`, `medium`, `high`, `xhigh`, `max` | Use one of those ids or drop the flag. |
+| `route` exits 2: unknown expert lens | `--experts` named an id that is not one of the fifteen | Use ids from the error line (it lists every valid id) or drop the flag to route automatically. |
 | `before executing: /spec` printed | The enhanced brief carries Open questions or a NOTE: | Resolve them (run `/spec`, or answer them and re-run `/code-plan`) before `/code-execute` — the executor asks no questions and will decide for you. |
 | `WARN: could not write pipeline signal` | `.plan/.signals/` unwritable at the repo root | The plan itself is unaffected. Automation watching `.plan/.signals/` will not see this run — fix the permissions or drive the next stage manually. |
