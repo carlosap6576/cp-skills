@@ -54,14 +54,19 @@ directory — no chat parsing:
   "stage": "execute",
   "status": "success",
   "plan": "/abs/path/.plan/2026-08-26-add-export-plan.md",
-  "detail": "IMPLEMENTATION COMPLETE — all 9 steps executed and verified.",
+  "detail": "IMPLEMENTATION COMPLETE — all 9 steps implemented.",
   "written_at": "2026-08-26T18:00:00+00:00"
 }
 ```
 
-`status` is `success` only when execution ended with the
-`IMPLEMENTATION COMPLETE` report; every failed, partial, or stopped run
-signals `failed` with the reason in `detail`. On success the orchestrator's
+`status` is `success` whenever every plan step was implemented. The
+executor does not validate: failing or flaky tests, environmental failures
+(port or folder contention) and plan-check conflicts are listed in the
+report's **Hand-off to validation** block, and `detail` notes their count,
+but they never turn the signal `failed`. `failed` means a step could not be
+implemented at all (guardrail denial, a dependency the plan names does not
+exist, an impossible plan) or the run stopped before execution, with the
+reason in `detail`. On success the orchestrator's
 next stage is `/code-validation -p <plan>`. The sibling skills write
 `<plan-stem>.plan.json` and `<plan-stem>.validate.json` to the same directory
 with the same schema. The `.signals` directory never interferes with `.plan`

@@ -330,7 +330,7 @@ class SignalTests(unittest.TestCase):
             (root / "a-plan.md").write_text("### Step\n", encoding="utf-8")
         cap, files = self._run(
             ["signal", "--status", "success", "--plan", "a-plan.md",
-             "--detail", "IMPLEMENTATION COMPLETE — all 3 steps executed and verified."],
+             "--detail", "IMPLEMENTATION COMPLETE — all 3 steps implemented."],
             build=build)
         self.assertEqual(cap.code, 0, cap.stderr)
         name = f"a-plan.{self.STAGE}.json"

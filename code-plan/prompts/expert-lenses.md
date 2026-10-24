@@ -6,7 +6,7 @@ across gstack releases even as the skills' procedures evolve. Selection is
 routed against the deterministic `route` subcommand (the baseline); this file
 only supplies the lens content for the shortlisted experts.
 
-Verified against gstack 1.91.2.0 by hand (every plan-tier and post-tier skill
+Verified against gstack 1.91.185.0 by hand (every plan-tier and post-tier skill
 read in full, including their on-demand `sections/*.md`). Lens ids and skill
 names here MUST stay in sync with SIGNALS / LENS_SKILL in
 scripts/code_plan.py (enforced by selftest RoutingTableConsistencyTests).
@@ -424,8 +424,8 @@ or resource usage: optimizing a slow path, adding caching, cutting memory, or
 the instructions name a performance budget.
 
 - Measure before and after: the plan's first perf step captures a baseline
-  (timing, query count, memory, bundle bytes) and its last step re-runs the
-  same measurement. A perceived speedup without numbers is not a result.
+  (timing, query count, memory, bundle bytes) and `## Verification` re-runs
+  the same measurement (the validator runs it; the executor only implements). A perceived speedup without numbers is not a result.
 - Name the budget that makes this done (p95 < X ms, N queries, Y KB) and
   the regression threshold (timing +50% or +500ms, bytes +25% is a
   regression; frontend budgets FCP < 1.8s, LCP < 2.5s, JS < 500KB).
@@ -785,7 +785,7 @@ prerequisite), **util** (session tooling; never a `next:` line on its own).
 
 ### gstack hand-off contract notes
 
-Behavioral facts about the follow-up skills, verified against gstack 1.91.2.0
+Behavioral facts about the follow-up skills, verified against gstack 1.91.185.0
 by hand; the live snapshot in `prompts/gstack-contract.md` supersedes any
 version-specific detail here. These change how a chained review behaves — not
 which skill is recommended:

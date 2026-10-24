@@ -191,8 +191,9 @@ def cmd_render(args: argparse.Namespace) -> int:
 #
 # File:   .plan/.signals/<plan-stem>.<stage>.json   (stem "pipeline" when no
 #         plan path is known — e.g. a run that STOPped before resolving one)
-# Status: "success" | "failed" — success may ONLY be passed when Step 4 ended
-#         with the IMPLEMENTATION COMPLETE report (SKILL.md enforces this).
+# Status: "success" | "failed" — success is passed whenever Step 4 ended with
+#         the IMPLEMENTATION COMPLETE report (every step implemented; red
+#         checks are hand-off notes, not failures — SKILL.md enforces this).
 
 SIGNAL_SCHEMA = 1
 SIGNAL_DIRNAME = ".signals"
@@ -273,8 +274,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="write the pipeline stage signal to "
                              "<repo-root>/.plan/.signals/")
     sp.add_argument("--status", required=True, choices=("success", "failed"),
-                    help="stage outcome; success ONLY after the "
-                         "IMPLEMENTATION COMPLETE report")
+                    help="stage outcome; success after the "
+                         "IMPLEMENTATION COMPLETE report (all steps "
+                         "implemented; verification is code-validation's)")
     sp.add_argument("--plan", default=None,
                     help="path to the executed plan .md (omit if the run "
                          "STOPped before a path was resolved)")
