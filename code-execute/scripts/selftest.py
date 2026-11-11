@@ -291,6 +291,78 @@ class DefaultPlanTests(unittest.TestCase):
         self.assertEqual(Path(out.stdout.strip()).parent,
                          (root / ".plan").resolve())
 
+    def _signal(self, root, stem, stage, status="success", at="2026-11-11T10:00:00+00:00"):
+        import json
+        d = root / ".plan" / ".signals"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{stem}.{stage}.json").write_text(
+            json.dumps({"status": status, "written_at": at}), encoding="utf-8")
+
+    def _two_plans(self, root):
+        (root / ".git").mkdir()
+        d = root / ".plan"
+        d.mkdir()
+        (d / "a-plan.md").write_text("### Step 1\n", encoding="utf-8")
+        (d / "b-plan.md").write_text("### Step 1\n", encoding="utf-8")
+
+    def test_signals_single_out_the_one_pending_plan(self):
+        def build(root):
+            self._two_plans(root)
+            self._signal(root, "a-plan", "plan")
+            self._signal(root, "a-plan", "execute", at="2026-11-11T11:00:00+00:00")
+            self._signal(root, "b-plan", "plan")
+        out, _ = self._in_tmp(build)
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertTrue(out.stdout.strip().endswith("b-plan.md"))
+        self.assertIn("NOTE:", out.stderr)
+
+    def test_a_newer_upstream_signal_makes_the_plan_pending_again(self):
+        def build(root):
+            self._two_plans(root)
+            self._signal(root, "a-plan", "execute", at="2026-11-10T09:00:00+00:00")
+            self._signal(root, "a-plan", "plan", at="2026-11-11T09:00:00+00:00")
+        out, _ = self._in_tmp(build)
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertTrue(out.stdout.strip().endswith("a-plan.md"))
+
+    def test_two_pending_plans_still_exit_2(self):
+        def build(root):
+            self._two_plans(root)
+            self._signal(root, "a-plan", "plan")
+            self._signal(root, "b-plan", "plan")
+        out, _ = self._in_tmp(build)
+        self.assertEqual(out.code, 2)
+        self.assertIn("2 plans", out.stderr)
+
+    def test_failed_or_malformed_signals_never_select_a_plan(self):
+        def build(root):
+            self._two_plans(root)
+            self._signal(root, "a-plan", "plan", status="failed")
+            (root / ".plan" / ".signals" / "b-plan.plan.json").write_text(
+                "not json", encoding="utf-8")
+        out, _ = self._in_tmp(build)
+        self.assertEqual(out.code, 2)
+
+    def test_repo_root_walks_up_from_the_plan_without_git(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".git").mkdir()
+            (root / "docs" / "plans").mkdir(parents=True)
+            plan = root / "docs" / "plans" / "p.md"
+            plan.write_text("### Step 1\n", encoding="utf-8")
+            out = io_capture(code_execute.main, ["repo-root", "--plan", str(plan)])
+            self.assertEqual(out.code, 0, out.stderr)
+            self.assertEqual(out.stdout.strip(), str(root))
+
+    def test_repo_root_without_git_is_the_parent_of_dot_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".plan").mkdir()
+            plan = root / ".plan" / "p.md"
+            plan.write_text("### Step 1\n", encoding="utf-8")
+            out = io_capture(code_execute.main, ["repo-root", "--plan", str(plan)])
+            self.assertEqual(out.stdout.strip(), str(root))
+
 
 class SignalTests(unittest.TestCase):
     """Pipeline stage signal (v1.4.0): one atomic JSON file per stage under

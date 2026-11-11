@@ -387,7 +387,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(out.code, 0, out.stderr)
         payload = json.loads(out.stdout)
         self.assertEqual(payload["lenses"][0], "eng")
-        self.assertEqual(payload["recommended_skill"], "plan-eng-review")
+        self.assertEqual(payload["recommended_skill"], "autoplan")
 
     def test_cli_skill_routes_to_devex(self):
         out = self._run_route(
@@ -568,6 +568,8 @@ class RoutingTableConsistencyTests(unittest.TestCase):
         )
         table = self.distillate[idx:]
         for lens, skill in code_plan.LENS_SKILL.items():
+            if skill is None:
+                continue
             with self.subTest(lens=lens, skill=skill):
                 self.assertIn(
                     skill, table,
@@ -721,15 +723,15 @@ class RouteNewLensTests(unittest.TestCase):
         payload = self._route(
             "deduplicate the copy-pasted retry logic into a shared helper")
         self.assertIn("reuse", payload["lenses"])
-        self.assertEqual(code_plan.LENS_SKILL["reuse"], "plan-eng-review")
+        self.assertEqual(code_plan.LENS_SKILL["reuse"], "autoplan")
 
-    def test_three_lenses_in_one_family_keep_plan_eng_review(self):
-        """eng + data + api all read best under plan-eng-review; autoplan
-        would spend a CEO and a design pass on a backend-only plan."""
+    def test_three_lenses_in_one_family_get_the_eng_reviewer(self):
+        """eng + data + api share one reviewer: autoplan, which carries the
+        eng review since gstack 1.98 retired the standalone skill."""
         payload = self._route(
             "add a paginated /api/v1/quotes endpoint backed by a new sqlite schema")
         self.assertEqual(len(payload["lenses"]), code_plan.MAX_LENSES)
-        self.assertEqual(payload["recommended_skill"], "plan-eng-review")
+        self.assertEqual(payload["recommended_skill"], "autoplan")
 
     def test_three_lenses_across_families_recommend_autoplan(self):
         payload = self._route(
@@ -740,9 +742,20 @@ class RouteNewLensTests(unittest.TestCase):
 
     def test_forced_three_lenses_follow_the_family_rule(self):
         one_family = self._route("x", experts="eng,data,api")
-        self.assertEqual(one_family["recommended_skill"], "plan-eng-review")
+        self.assertEqual(one_family["recommended_skill"], "autoplan")
         two_families = self._route("x", experts="eng,design,api")
         self.assertEqual(two_families["recommended_skill"], "autoplan")
+
+    def test_retired_gstack_skills_are_never_recommended(self):
+        """gstack 1.98 retired /plan-eng-review and /investigate."""
+        self.assertNotIn("plan-eng-review", code_plan.LENS_SKILL.values())
+        self.assertNotIn("investigate", code_plan.LENS_SKILL.values())
+
+    def test_bug_fix_plans_get_no_plan_reviewer(self):
+        payload = self._route("the export job crashes with a timeout exception")
+        self.assertEqual(payload["lenses"][0], "investigate")
+        self.assertIsNone(payload["recommended_skill"])
+        self.assertIsNone(self._route("x", experts="qa,eng")["recommended_skill"])
 
     def test_open_questions_set_clarify_and_pre_skill(self):
         payload = self._route(

@@ -22,18 +22,22 @@
 #   ./install.sh --skip a,b             # exclude these skills
 #   ./install.sh --list                 # list discovered skills + versions and exit
 #   ./install.sh --no-gstack            # skip the gstack install/upgrade + contract sync
+#   ./install.sh --no-upgrade           # use the installed gstack as is (no fetch, no ./setup) but still re-sync the contract
 #   ./install.sh --no-sync              # upgrade gstack but leave the skills' contract snapshot alone
 #   ./install.sh --gstack-dir DIR       # gstack checkout to manage (default ~/.claude/skills/gstack)
 #   ./install.sh --uninstall            # remove every skill from every candidate root (gstack is left alone)
 #   ./install.sh --dir DIR --uninstall  # remove from DIR/<skill> only
 #
-# gstack: the code-* skills chain into gstack (/review, /qa, /cso, /ship, the
-# plan reviews). Every run installs gstack if missing, fast-forwards an
-# existing git checkout to origin/main and reruns its ./setup, then re-verifies
-# the hand-off contract against what is actually installed — /review's
-# specialist roster and force flags, its diff thresholds, autoplan's phase
-# order, the plan-review scope gates, and the presence of every gstack skill
-# the roster names. The verified facts are written to each code-* skill's
+# gstack: the code-* skills borrow rubrics from gstack's experts and recommend
+# or chain them (/autoplan, /verify, /qa-only, /cso, /review …). Every run
+# installs gstack if missing, fast-forwards an existing git checkout to
+# origin/main and reruns its ./setup (third-party code: pass --no-upgrade to
+# pin what is installed), then re-verifies the hand-off contract against what
+# is actually INVOKABLE — a skill directory is not enough; gstack's registry
+# keeps retired skills out of every skills root — plus each expert's
+# chain-safety scan (does it write git?), /review's specialist roster, force
+# flags and thresholds, autoplan's phase order, the plan-review scope gates,
+# and every gstack skill the hand-written rosters name. The verified facts are written to each code-* skill's
 # prompts/gstack-contract.md, its "verified against gstack X" pins are bumped,
 # and its patch version is bumped when the snapshot changed. --doctor reports
 # the drift without touching anything.
@@ -54,6 +58,7 @@ SKIP=""
 EXTRA_ROOTS=()
 DO_GSTACK=1
 DO_SYNC=1
+DO_UPGRADE=1
 GSTACK_DIR="${GSTACK_DIR:-$HOME/.claude/skills/gstack}"
 GSTACK_REPO_URL="https://github.com/garrytan/gstack.git"
 MANIFEST_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cp-skills"
@@ -94,6 +99,7 @@ while [ $# -gt 0 ]; do
       SKIP="$2"; shift 2 ;;
     --no-gstack) DO_GSTACK=0; shift ;;
     --no-sync) DO_SYNC=0; shift ;;
+    --no-upgrade) DO_UPGRADE=0; shift ;;
     --gstack-dir)
       [ $# -ge 2 ] || { echo "ERROR: --gstack-dir needs a directory argument" >&2; exit 2; }
       GSTACK_DIR="$2"; shift 2 ;;
@@ -304,6 +310,26 @@ for skill in "${SKILLS[@]}"; do
     fi
   done
 
+  # skill knowledge: the contract a harness reads must be well-formed and
+  # every file it sends the agent to must exist
+  fm_name="$(sed -n 's/^name:[[:space:]]*"\{0,1\}\([A-Za-z0-9_-]*\)"\{0,1\}[[:space:]]*$/\1/p' "$src/SKILL.md" | head -n 1)"
+  if [ -n "$fm_name" ] && [ "$fm_name" != "$skill" ]; then
+    fail "$skill: SKILL.md frontmatter says name: $fm_name — harnesses key on the folder name; make them match"
+  fi
+  desc_len="$(sed -n 's/^description:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$src/SKILL.md" | head -n 1 | wc -c | tr -d ' ')"
+  if [ "${desc_len:-0}" -le 1 ]; then
+    warn "$skill: SKILL.md has no one-line description — harnesses cannot decide when to load it"
+  elif [ "$desc_len" -gt 1024 ]; then
+    warn "$skill: SKILL.md description is $desc_len chars — over the 1024-char skill limit; harnesses truncate or reject it"
+  fi
+  missing_refs=""
+  for ref in $(grep -oE '\$SKILL_DIR/(prompts|scripts)/[A-Za-z0-9_.-]+\.(md|py|sh|json|ya?ml|txt)' "$src/SKILL.md" 2>/dev/null | sed 's|^\$SKILL_DIR/||' | sort -u); do
+    [ -f "$src/$ref" ] || missing_refs="$missing_refs $ref"
+  done
+  if [ -n "$missing_refs" ]; then
+    fail "$skill: SKILL.md points the agent at file(s) that do not exist:$missing_refs"
+  fi
+
   # highest Python floor across the selected skills drives the dependency check
   m="$(skill_python_min "$src")"
   if [ "${m#3.}" -gt "${PY_MIN#3.}" ]; then PY_MIN="$m"; fi
@@ -360,6 +386,21 @@ else
   warn "✗ git not found — the code-* skills fall back to the plan's own directory; install git for full repo-root behavior"
 fi
 
+# optional tools the skills and their gstack experts lean on — each absence
+# degrades one named capability, none blocks an install
+opt_tool() {  # $1 = binary, $2 = what works with it, $3 = what happens without it
+  if command -v "$1" >/dev/null 2>&1; then ok "✓ $1 — $2"; else note "◦ $1 not found — $3"; fi
+}
+if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+  ok "✓ timeout — the gstack memory lookups are capped at 15 s"
+else
+  note "◦ timeout not found — the code-* skills run gstack's memory lookups uncapped (macOS: 'brew install coreutils')"
+fi
+opt_tool bun    "gstack can be installed and upgraded"                       "gstack cannot be installed or upgraded by this installer (https://bun.sh)"
+opt_tool codex  "gstack reviews get a cross-model outside voice"             "gstack reviews fall back to a same-family reviewer"
+opt_tool docker "/cso can run its scanners (gitleaks, osv, semgrep, trivy)"  "/cso degrades to a static audit"
+opt_tool gh     "human-run landing skills (/ship, /land-and-deploy) work"    "only the human-run landing skills are affected; the code-* skills never call it"
+
 # optional: gstack (powers --skill chaining into /review, /qa, /cso, /ship).
 # Presence only here — install/upgrade and the contract re-sync are phases 2b/2c.
 if [ -f "$GSTACK_DIR/VERSION" ]; then
@@ -404,7 +445,15 @@ gstack_setup() {  # reruns gstack's own ./setup; $1 = label for the log line
   return 1
 }
 
-if [ "$DO_GSTACK" = "1" ]; then
+if [ "$DO_GSTACK" = "1" ] && [ "$DO_UPGRADE" = "0" ]; then
+  section "gstack ($GSTACK_DIR)"
+  if [ -f "$GSTACK_DIR/VERSION" ]; then
+    ok "✓ gstack $(gstack_version) kept as installed (--no-upgrade: no fetch, no ./setup)"
+  else
+    warn "◦ gstack not installed and --no-upgrade given — nothing to sync against"
+  fi
+  GSTACK_VER="$(gstack_version)"
+elif [ "$DO_GSTACK" = "1" ]; then
   section "gstack install & upgrade ($GSTACK_DIR)"
 
   if [ ! -f "$GSTACK_DIR/VERSION" ]; then
@@ -506,25 +555,92 @@ installed_anywhere() {  # $1 = skill name; true if any candidate skills root has
   return 1
 }
 
+GSTACK_SKILLS_ROOT="$(dirname "$GSTACK_DIR")"
+# Experts the code-* skills chain without a human (see "Chain safety" in the
+# gstack-experts.md rosters). The doctor re-scans them after every upgrade.
+CHAIN_SAFE_SKILLS="verify qa-only cso deslop-shared-libs test-audit health"
+GS_NON_SKILL_DIRS="node_modules test docs scripts lib bin hosts patches licenses contrib supabase extension agents agents-digest model-overlays browser-skills gstack claude claude-code codex openclaw design crew capy qm modules changelog.d"
+
+gs_registry_list() {  # $1 = variable name in gstack's install registry; prints its space-separated value
+  sed -n "s/^$1=\"\([a-z0-9 -]*\)\"[[:space:]]*$/\1/p" "$GSTACK_DIR/bin/gstack-install-registry.sh" 2>/dev/null | head -n 1
+}
+
+gs_skill_dirs() {  # prints every gstack skill directory name (has a SKILL.md, is not tooling)
+  local d name
+  for d in "$GSTACK_DIR"/*/; do
+    d="${d%/}"; name="$(basename "$d")"
+    [ -f "$d/SKILL.md" ] || continue
+    in_list "$name" "$(printf '%s' "$GS_NON_SKILL_DIRS" | tr ' ' ',')" && continue
+    printf '%s\n' "$name"
+  done
+}
+
+gs_invokable() {  # $1 = gstack skill name; true when a harness can actually invoke it
+  # gstack's setup registers each skill as <skills-root>/<name>/SKILL.md and
+  # keeps retired / crew-only / user-disabled skills out. A directory inside
+  # the gstack checkout is NOT proof. When nothing at all is registered next
+  # to the checkout (a vendored or relocated copy), fall back to the registry.
+  if [ -f "$GSTACK_SKILLS_ROOT/review/SKILL.md" ] || [ -f "$GSTACK_SKILLS_ROOT/qa/SKILL.md" ]; then
+    [ -f "$GSTACK_SKILLS_ROOT/$1/SKILL.md" ]
+  else
+    ! in_list "$1" "$(printf '%s' "$(gs_registry_list GSTACK_RETIRED_SKILLS) $(gs_registry_list GSTACK_CREW_SKILLS)" | tr ' ' ',')"
+  fi
+}
+
+gs_git_writer() {  # $1 = gstack skill name; true when its instructions contain git/GitHub write commands
+  grep -rqE --include='*.md' \
+    'git commit -m|git push( |$|`)|git stash push|git rebase |git worktree add|--force-with-lease|gh pr (merge|create)|^[[:space:]]*git (add|commit|push|restore|revert) ' \
+    "$GSTACK_DIR/$1" 2>/dev/null
+}
+
+gs_asks() {  # $1 = gstack skill name; true when it can stop for a person
+  grep -q 'AskUserQuestion' "$GSTACK_DIR/$1/SKILL.md" 2>/dev/null
+}
+
 render_contract() {  # prints the snapshot for the installed gstack
-  local army="$GSTACK_DIR/review/sections/review-army.md" d name desc
+  local army="$GSTACK_DIR/review/sections/review-army.md" name desc scan retired
+  retired="$(gs_registry_list GSTACK_RETIRED_SKILLS)"
   printf '# gstack hand-off contract — live snapshot\n\n'
   printf '<!-- GENERATED by cp-skills/install.sh (gstack contract sync). Do not edit by\n'
   printf '     hand: rerun ./install.sh from the cp-skills checkout to refresh. -->\n\n'
   printf 'verified_against: gstack %s\n\n' "$GSTACK_VER"
-  printf 'This file is the authoritative list of what is installed. The hand-written\n'
+  printf 'This file is the authoritative list of what can be invoked. The hand-written\n'
   printf 'rosters and routing tables in the sibling prompt files are worked examples;\n'
-  printf 'when they disagree with this file, this file wins. Choose the installed\n'
-  printf 'expert that best suits the work at hand — including experts that were added\n'
-  printf 'to gstack after those examples were written.\n\n'
+  printf 'when they disagree with this file, this file wins. Choose the invokable\n'
+  printf 'expert that best suits the work at hand, including experts that were added\n'
+  printf 'to gstack after those examples were written. Never name a skill listed\n'
+  printf 'under "Retired or not invokable".\n\n'
 
-  printf '## Installed gstack experts\n\n| Skill | What it does |\n|---|---|\n'
-  for d in "$GSTACK_DIR"/*/; do
-    d="${d%/}"; name="$(basename "$d")"
-    [ -f "$d/SKILL.md" ] || continue
-    case "$name" in node_modules|test|docs|scripts|lib|bin|hosts|patches|licenses|contrib|supabase|extension|agents|agents-digest|model-overlays|browser-skills|gstack|claude|codex|openclaw|design) continue ;; esac
-    desc="$(gs_frontmatter_desc "$d/SKILL.md")"
-    printf '| `/%s` | %s |\n' "$name" "${desc:-—}"
+  printf '## Invokable gstack experts\n\n'
+  printf 'Chain-safety scan: `git writer` = its instructions contain commit, push,\n'
+  printf 'stash, rebase, worktree or PR commands (the pipeline never chains it);\n'
+  printf '`asks` = it can stop for a person unless the session kind is `spawned`;\n'
+  printf '`quiet` = neither. The scan is a floor: the "Chain safety" table in\n'
+  printf 'gstack-experts.md decides what is chained.\n\n'
+  printf '| Skill | What it does | Chain-safety scan |\n|---|---|---|\n'
+  for name in $(gs_skill_dirs); do
+    gs_invokable "$name" || continue
+    desc="$(gs_frontmatter_desc "$GSTACK_DIR/$name/SKILL.md")"
+    scan="quiet"
+    gs_asks "$name" && scan="asks"
+    gs_git_writer "$name" && scan="git writer"
+    printf '| `/%s` | %s | %s |\n' "$name" "${desc:-—}" "$scan"
+  done
+
+  printf '\n## Retired or not invokable\n\n'
+  printf 'Present in the gstack checkout or named by older prompts, but NOT registered\n'
+  printf 'as a skill on this machine. Do not recommend or chain any of them.\n\n'
+  for name in $retired; do
+    case "$name" in
+      plan-eng-review) printf -- '- %s — retired by gstack; its methodology is the eng phase of `/autoplan`\n' "$name" ;;
+      investigate)     printf -- '- %s — retired by gstack; failures are handled inline (cause check, failing test, root-cause fix)\n' "$name" ;;
+      *)               printf -- '- %s — retired by gstack\n' "$name" ;;
+    esac
+  done
+  for name in $(gs_skill_dirs); do
+    gs_invokable "$name" && continue
+    in_list "$name" "$(printf '%s' "$retired" | tr ' ' ',')" && continue
+    printf -- '- %s — in the checkout but not registered on this machine (crew-only or disabled)\n' "$name"
   done
 
   printf '\n## `/review` specialists\n\n'
@@ -532,36 +648,48 @@ render_contract() {  # prints the snapshot for the installed gstack
     printf 'Specialist checklists installed: '
     ls "$GSTACK_DIR/review/specialists"/*.md 2>/dev/null | sed 's|.*/||; s|\.md$||' | tr '\n' ' ' ; printf '\n'
     [ -f "$GSTACK_DIR/review/design-checklist.md" ] && printf 'Design specialist: checklist-driven (`review/design-checklist.md`).\n'
-    printf 'Force flags: %s\n' "$(grep -m1 -F '**Force flags:**' "$army" | grep -oE -- '`--[a-z-]+`' | tr -d '`' | tr '\n' ' ')"
+    printf 'Force flags: %s\n' "$(grep -m1 -F '**Force flags:**' "$army" | sed 's/^\*\*Force flags:\*\*[[:space:]]*//' | cut -c1-160)"
     printf 'Always-on threshold: %s\n' "$(grep -oE -m1 'every review with [0-9]+\+ changed lines' "$army" || echo 'not stated')"
-    printf 'Small-diff skip: %s → all specialists skipped\n' "$(grep -oE -m1 'DIFF_LINES < [0-9]+' "$army" || echo 'not stated')"
+    printf 'Small-diff rule: %s\n' "$(grep -m1 -F '**If DIFF_LINES <' "$army" | sed 's/\*\*//g' | cut -d. -f1 | cut -c1-120 || echo 'not stated')"
     printf 'Security (backend scope): %s\n' "$(grep -m1 -F '**Security**' "$army" | grep -oE 'DIFF_LINES > [0-9]+' || echo 'not stated')"
     printf 'Simplification: %s (advisory only)\n' "$(grep -m1 -F '**Simplification**' "$army" | grep -oE 'DIFF_LINES > [0-9]+' || echo 'not installed')"
     printf 'Red team: %s\n' "$(grep -m1 -F '**Activation:**' "$army" | sed 's/^\*\*Activation:\*\*[[:space:]]*//' || echo 'not stated')"
-    grep -q 'NEVER_GATE' "$army" && printf 'Adaptive gating: conditional specialists with 0 findings in 10+ dispatches are auto-gated off; NEVER_GATE specialists (security, data-migration) always run.\n'
+    grep -q 'NEVER_GATE' "$army" && printf 'Adaptive gating: conditional specialists with 0 findings in 10+ dispatches are auto-gated off; NEVER_GATE specialists always run.\n'
+    grep -q 'on the base branch' "$GSTACK_DIR/review/SKILL.md" 2>/dev/null && printf 'Branch rule: exits with nothing to review when the checkout is on the base branch.\n'
+    grep -q 'git fetch origin' "$GSTACK_DIR/review/SKILL.md" 2>/dev/null && printf 'Git: fetches the base branch; never commits, pushes or opens a PR.\n'
   else
     printf 'review-army section not found in this gstack — specialist mechanics unknown.\n'
   fi
 
   printf '\n## `/autoplan` phase order\n\n'
-  tr '\n' ' ' < "$GSTACK_DIR/autoplan/SKILL.md" 2>/dev/null | grep -oE 'Phases MUST execute in strict order: [^.]*\.' | head -n 1 || printf 'not stated\n'
+  tr '\n' ' ' < "$GSTACK_DIR/autoplan/SKILL.md" 2>/dev/null | grep -oE 'Phases MUST (execute|run) in strict order: [^.]*\.( Eng runs LAST[^.]*\.)?' | head -n 1 | grep . || printf 'not stated\n'
   printf '\n\n## Plan-review scope gates\n\n'
-  for name in plan-eng-review plan-design-review plan-ceo-review plan-devex-review autoplan; do
-    if [ ! -f "$GSTACK_DIR/$name/SKILL.md" ]; then printf -- '- `/%s`: NOT INSTALLED\n' "$name"
+  for name in plan-design-review plan-ceo-review plan-devex-review autoplan; do
+    if ! gs_invokable "$name"; then printf -- '- `/%s`: NOT INVOKABLE\n' "$name"
     elif grep -q '^## Scope gate' "$GSTACK_DIR/$name/SKILL.md"; then printf -- '- `/%s`: scope gate (auto-resolves when the target is named in args or in plan mode)\n' "$name"
     elif grep -q 'Scope gate' "$GSTACK_DIR/$name/SKILL.md"; then printf -- '- `/%s`: no gate question — the plan under review is already the target\n' "$name"
     else printf -- '- `/%s`: no scope gate\n' "$name"; fi
   done
 
-  printf '\n## Roster check\n\nEvery gstack skill named in the hand-written prompts, verified present:\n\n'
+  printf '\n## Session kinds (how a chained gstack skill resolves its questions)\n\n'
+  if [ -x "$GSTACK_DIR/bin/gstack-session-kind" ]; then
+    printf 'Read from the `gstack-skill-start` preamble only, never from prompt text.\n'
+    printf 'Prefix `GSTACK_SESSION_KIND=spawned` on that command: recommended options are\n'
+    printf 'taken, destructive ones never. `unattended` leaves consents and approval\n'
+    printf 'gates pending. `GSTACK_HEADLESS` / `CI` make a question BLOCK.\n'
+  else
+    printf 'gstack-session-kind not found in this gstack — assume chained skills may ask.\n'
+  fi
+
+  printf '\n## Roster check\n\nEvery gstack skill named in the hand-written prompts, verified invokable:\n\n'
   local missing=0
   for name in $(gs_skill_names_in "$REPO"/code-*/prompts/gstack-experts.md "$REPO"/code-*/prompts/expert-lenses.md); do
     case "$name" in code-plan|code-execute|code-validation) continue ;; esac
-    if [ -f "$GSTACK_DIR/$name/SKILL.md" ]; then printf -- '- `/%s` ✓\n' "$name"
-    elif installed_anywhere "$name"; then printf -- '- `/%s` ✓ (not a gstack skill; installed separately)\n' "$name"
-    else printf -- '- `/%s` ✗ MISSING from this gstack — do not recommend it\n' "$name"; missing=$((missing+1)); fi
+    if [ -f "$GSTACK_DIR/$name/SKILL.md" ] && gs_invokable "$name"; then printf -- '- `/%s` ✓\n' "$name"
+    elif [ ! -f "$GSTACK_DIR/$name/SKILL.md" ] && installed_anywhere "$name"; then printf -- '- `/%s` ✓ (not a gstack skill; installed separately)\n' "$name"
+    else printf -- '- `/%s` ✗ NOT INVOKABLE with this gstack — do not recommend it\n' "$name"; missing=$((missing+1)); fi
   done
-  [ "$missing" -eq 0 ] && printf '\nAll named skills present.\n'
+  [ "$missing" -eq 0 ] && printf '\nAll named skills are invokable.\n'
   return 0
 }
 
@@ -582,9 +710,22 @@ if [ "$DO_GSTACK" = "1" ] && [ "$DO_SYNC" = "1" ] && [ "${#CONTRACT_SKILLS[@]}" 
     tmp_contract="$(mktemp)"
     sync_changes_before="${#CHANGES[@]}"
     render_contract > "$tmp_contract"
-    missing_n="$(grep -c 'MISSING from this gstack' "$tmp_contract" || true)"
+    missing_n="$(grep -c 'NOT INVOKABLE with this gstack' "$tmp_contract" || true)"
     if [ "$missing_n" -gt 0 ]; then
-      warn "✗ $missing_n skill(s) named in the hand-written prompts are missing from gstack $GSTACK_VER — recorded in the snapshot; update the prompts"
+      warn "✗ $missing_n skill(s) named in the hand-written prompts cannot be invoked with gstack $GSTACK_VER — recorded in the snapshot; update the prompts: $(grep 'NOT INVOKABLE with this gstack' "$tmp_contract" | grep -oE '/[a-z0-9-]+' | tr '\n' ' ')"
+    else
+      ok "every gstack skill the rosters name is invokable"
+    fi
+    for name in $CHAIN_SAFE_SKILLS; do
+      if ! gs_invokable "$name"; then
+        warn "✗ chain-safe expert /$name is not invokable with gstack $GSTACK_VER — the skills will report it instead of chaining; update the Chain safety tables"
+      elif gs_git_writer "$name"; then
+        warn "✗ chain-safe expert /$name now contains git write commands in gstack $GSTACK_VER — re-verify it and move it to the human-run tier in the Chain safety tables"
+      fi
+    done
+    retired_named="$(grep -rnoE '(--skill=|→ |/)(plan-eng-review|investigate)\b' "$REPO"/code-*/SKILL.md 2>/dev/null | head -n 3 | tr '\n' ' ' || true)"
+    if [ -n "$retired_named" ] && ! gs_invokable plan-eng-review; then
+      warn "✗ a SKILL.md still routes to a retired gstack skill: $retired_named"
     fi
     for skill in "${CONTRACT_SKILLS[@]}"; do
       src="$REPO/$skill"; dest="$src/$CONTRACT_FILE"; changed=0

@@ -39,6 +39,16 @@ Manual install (any runtime):
 ln -s "$PWD" ~/.claude/skills/code-execute
 ```
 
+## Auto mode
+
+Every run is unattended by contract: the skill never asks a question, never
+pauses for confirmation, and never runs a git write. It runs no git command at all, read or
+write, and leaves every test run to `/code-validation`. With several plans in
+`.plan/` it picks the one the pipeline signals show as planned and not yet
+executed. When it cannot
+proceed it stops with a one-line reason and a `failed` pipeline signal
+instead of waiting for input.
+
 ## Pipeline signal (for automation)
 
 Every run ends by atomically writing one machine-readable JSON file to

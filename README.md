@@ -8,8 +8,8 @@ all — they are independent except where noted.
 | Skill | Purpose |
 |---|---|
 | `code-plan` | Turn a rough request into a step-by-step implementation plan. |
-| `code-execute` | Execute an existing plan file step-by-step, with verification gates. |
-| `code-validation` | Audit an implementation against its plan and fix the gaps. |
+| `code-execute` | Execute an existing plan file step-by-step; no questions, no git, verification left to `code-validation`. |
+| `code-validation` | Audit an implementation against its plan: fix, refactor, security and production-readiness gate, prove green, sweep clean. |
 | `stock-eval` | Engagement-ranked social/market read on a ticker, with a strict synthesis voice contract. |
 
 ## Install
@@ -42,8 +42,19 @@ thresholds, `/autoplan`'s phase order, plan-review scope gates), the skills'
 "verified against gstack X" pins are bumped, and their patch version is bumped
 when the snapshot changed. The skills treat that snapshot as the live roster
 and pick the best-suited installed expert, so new gstack experts are usable as
-soon as the installer has run. `--no-gstack` skips all of it, `--no-sync`
-upgrades gstack but leaves the snapshot alone.
+soon as the installer has run. The snapshot lists only skills that are
+actually invokable (gstack keeps retired skills out of the skills root even
+though their folders remain), scans each one for git write commands, and the
+doctor warns when an expert the pipeline chains unattended stops being safe
+to chain. `--no-gstack` skips all of it, `--no-sync` upgrades gstack but
+leaves the snapshot alone, and `--no-upgrade` re-syncs against the gstack
+already installed without fetching or running its `./setup` (gstack is
+third-party code; use this to pin it).
+
+The doctor also checks each skill's contract (frontmatter name, description
+length, every prompt and script `SKILL.md` points at) and the optional tools
+the pipeline leans on (`timeout`, `bun`, `codex`, `docker`, `gh`), naming
+what degrades when one is absent.
 
 A skill is any top-level folder with a `SKILL.md`, so new skills are picked
 up automatically. Versions come from each skill's `SKILL.md` frontmatter

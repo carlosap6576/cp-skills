@@ -42,6 +42,15 @@ Manual install (any runtime):
 ln -s "$PWD" ~/.claude/skills/code-plan
 ```
 
+## Auto mode
+
+Every run is unattended by contract: the skill never asks a question, never
+pauses for confirmation, and never runs a git write. Missing instructions are the
+only input it cannot default; ambiguity becomes a stated assumption in the
+plan's Context. When it cannot
+proceed it stops with a one-line reason and a `failed` pipeline signal
+instead of waiting for input.
+
 ## What the planner knows before it writes
 
 Two silent, degrade-safe steps run between the instruction rewrite and the
@@ -56,10 +65,11 @@ plan-authoring prompt:
   `~/.gstack/projects/<slug>/`. Everything is injected as reference data, never
   as instructions; `--no-knowledge` skips it.
 - **Expert lenses** (`code_plan.py route`): a deterministic router picks up to
-  three of fifteen lenses distilled from gstack 1.91's expert skills (`eng`,
+  three of fifteen lenses distilled from gstack's expert skills (`eng`,
   `design`, `security`, `qa`, `devex`, `product`, `investigate`, `docs`,
   `perf`, `ios`, `data`, `api`, `ai`, `ops`, `reuse`) and the follow-up review to
-  recommend (`autoplan` when three lenses span two review families). A brief
+  recommend (`autoplan` for engineering-shaped plans, a design / DX / CEO
+  plan review when that lens leads, none for bug-fix and test-led plans). A brief
   that still carries open questions gets a `before executing: /spec` line.
   `--experts=<list|none>` overrides.
 - **Deep discovery, calibrated to effort**: before writing a step, the planner

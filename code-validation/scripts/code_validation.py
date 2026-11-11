@@ -5,7 +5,10 @@ code_validation.py — stdlib-only helper for the /code-validation skill.
 Subcommands:
   plan-check    Validate a plan file is an executable plan (.md with steps).
   render        Substitute the {{PATH}} placeholder in the validate-code template.
-  default-plan  Auto-discover the single plan in <repo-root>/.plan (omitted -p).
+  default-plan  Auto-discover the plan in <repo-root>/.plan (omitted -p): the only
+                plan, or the one the pipeline signals single out.
+  repo-root     Print the repo root containing the plan (filesystem walk, no git).
+  sweep-scan    Scan the change's added lines / new files for production debris.
   close-out     Delete the plan file and print the LAW 6 announcement line.
   signal        Write the machine-readable pipeline stage signal
                 (.plan/.signals/<plan-stem>.validate.json) for automation.
@@ -142,10 +145,11 @@ def cmd_render(args: argparse.Namespace) -> int:
 #   exactly one *.md in .plan  → print its absolute path, exit 0
 #   .plan missing              → exit 2
 #   .plan has no *.md files    → exit 2
-#   .plan has 2+ *.md files    → exit 2 (candidates listed on stderr)
-# The SKILL.md consumer differs from code-execute on exit 2: code-execute
-# STOPs (it never prompts), while code-validation falls back to its
-# path question — discovery only removes the prompt in the unambiguous case.
+#   .plan has 2+ *.md files    → the ONE plan whose pipeline signals show it
+#                                waiting for this stage (code-execute
+#                                succeeded, validation has not since) →
+#                                exit 0; otherwise exit 2 (candidates listed)
+# Exit 2 is a STOP with a failed signal in SKILL.md — the skill never prompts.
 
 DEFAULT_PLAN_DIRNAME = ".plan"
 
@@ -159,6 +163,34 @@ def _find_repo_root(start: Path) -> Path:
         if (candidate / ".git").exists():
             return candidate
     return cur
+
+
+def _signal_time(signal_dir: Path, stem: str, stage: str):
+    """`written_at` of a SUCCESS signal for (stem, stage), else None. A
+    missing, unreadable, malformed or failed signal is simply "no signal"."""
+    try:
+        data = json.loads((signal_dir / f"{stem}.{stage}.json")
+                          .read_text(encoding="utf-8"))
+        if data.get("status") != "success":
+            return None
+        return datetime.fromisoformat(data["written_at"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def _pending_plans(plans: list, signal_dir: Path) -> list:
+    """Plans the pipeline says are waiting for THIS stage: the upstream stage
+    succeeded and this stage has not succeeded since. Evidence, not a guess —
+    it reads only the signal files the sibling skills wrote."""
+    pending = []
+    for plan in plans:
+        upstream = _signal_time(signal_dir, plan.stem, UPSTREAM_STAGE)
+        if upstream is None:
+            continue
+        done = _signal_time(signal_dir, plan.stem, SIGNAL_STAGE)
+        if done is None or done < upstream:
+            pending.append(plan)
+    return pending
 
 
 def cmd_default_plan(_args: argparse.Namespace) -> int:
@@ -178,12 +210,38 @@ def cmd_default_plan(_args: argparse.Namespace) -> int:
         return 2
 
     if len(plans) > 1:
-        _err(f"{plan_dir} has {len(plans)} plans — pass -p to choose one:")
+        pending = _pending_plans(plans, plan_dir / SIGNAL_DIRNAME)
+        if len(pending) == 1:
+            _err(f"NOTE: {len(plans)} plans in {plan_dir}; the pipeline signals "
+                 f"show exactly one waiting for the {SIGNAL_STAGE} stage — "
+                 f"selected {pending[0].name}")
+            print(str(pending[0].resolve()))
+            return 0
+        _err(f"{plan_dir} has {len(plans)} plans and the pipeline signals do "
+             f"not single one out — pass -p to choose one:")
         for p in plans:
             _err(f"  -p {p}")
         return 2
 
     print(str(plans[0].resolve()))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# `repo-root` — the directory the plan's repo-relative paths resolve against
+# ---------------------------------------------------------------------------
+#
+# Pure filesystem walk from the plan file's own directory (never the git
+# binary), so the skill resolves its working directory without running git.
+
+def cmd_repo_root(args: argparse.Namespace) -> int:
+    plan = Path(args.plan).expanduser().resolve()
+    start = plan.parent
+    root = _find_repo_root(start)
+    # A plan saved in <root>/.plan with no .git above it still belongs to <root>.
+    if root == start and start.name == DEFAULT_PLAN_DIRNAME:
+        root = start.parent
+    print(str(root))
     return 0
 
 
@@ -256,6 +314,204 @@ def cmd_close_out(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# `sweep-scan` — mechanical proof for the Phase 5 production sweep
+# ---------------------------------------------------------------------------
+#
+# The sweep used to be prose the model had to remember at the end of a long
+# audit. This turns its checkable half into a tool result: feed it the
+# change's ADDED lines (a unified diff) and its NEW files, and it reports the
+# debris a production PR must not carry. Two tiers:
+#   BLOCK   — never ships: debugger hooks, conflict markers, AI attributions,
+#             focused tests, credential-shaped literals, scratch files,
+#             TODO-class notes, generated test scaffolding the plan does not
+#             name under "## Test deliverables".
+#   REVIEW  — legitimate only with a reason: print-style output (may be the
+#             product's CLI surface), lint/type suppressions, comment-only
+#             lines (the zero-comment policy), skipped tests, secret-named
+#             string assignments.
+# It reads only what it is handed — it never runs git and never edits a file.
+# Exit 0 = no BLOCK findings, 1 = BLOCK findings, 2 = usage error.
+
+_CODE_SUFFIXES = frozenset("""
+.py .pyi .rb .sh .bash .zsh .js .jsx .mjs .cjs .ts .tsx .go .rs .java .kt .kts
+.swift .c .h .cc .cpp .hpp .cs .php .scala .lua .sql .dart .vue .svelte .ex .exs
+""".split())
+_HASH_COMMENT_SUFFIXES = frozenset(
+    ".py .pyi .rb .sh .bash .zsh .ex .exs".split())
+_SCRATCH_NAME = re.compile(r"(\.(orig|rej|bak|tmp|swp|log)|~|\.DS_Store)$")
+_SCAFFOLD_PATH = re.compile(
+    r"(^|/)(__tests__|__mocks__|__snapshots__|__fixtures__|fixtures|mocks|stubs|"
+    r"testdata)/|(^|/)(test_[^/]+|conftest)\.py$|_test\.[A-Za-z]+$|"
+    r"\.(test|spec|stories)\.[A-Za-z]+$|(^|/)[^/]*Tests?\.(java|kt|swift|cs)$")
+_FUNCTIONAL_COMMENT = re.compile(
+    r"^\s*(#!|#\s*(type:|noqa|pragma|pylint:|mypy:|ruff:|shellcheck|-\*-|frozen_string_literal)|"
+    r"//\s*(eslint-|@ts-|go:|nolint|prettier-|istanbul|biome-|swiftlint:|"
+    r"SPDX-|Copyright|\+build)|///|/\*\*?\s*(@|eslint|istanbul|Copyright|SPDX)|"
+    r"#\s*(SPDX-|Copyright)|.*gstack-shortcut\(dec-)", re.IGNORECASE)
+
+_BLOCK_RULES = (
+    ("debug", re.compile(
+        r"\bconsole\.(log|debug|trace|dir)\s*\(|\bdebugger\b\s*;?\s*$|"
+        r"\bpdb\.set_trace\s*\(|\bbreakpoint\s*\(\s*\)|\bdbg!\s*\(|"
+        r"\bbinding\.(pry|irb)\b|\bbyebug\b|\bvar_dump\s*\(|\bdd\s*\(\s*\$")),
+    ("conflict-marker", re.compile(r"^(<{7}|>{7}) \S")),
+    ("ai-note", re.compile(
+        r"Generated (with|by) \[?(Claude|ChatGPT|Copilot|Cursor|Gemini|AI)\b|"
+        r"Co-Authored-By:\s*(Claude|Copilot|ChatGPT)|\bAs an AI\b|"
+        r"\bAI-generated\b|🤖", re.IGNORECASE)),
+    ("note", re.compile(r"\b(TODO|FIXME|HACK|XXX)\b(?=\s*[:(\-]|\s|$)")),
+    ("focused-test", re.compile(
+        r"\b(describe|it|test|context)\.only\s*\(|\b(fdescribe|fit|fcontext)\s*\(")),
+    ("secret", re.compile(
+        r"AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
+        r"\bgh[pousr]_[A-Za-z0-9]{36,}|\bsk-[A-Za-z0-9_-]{24,}|"
+        r"\bxox[baprs]-[A-Za-z0-9-]{10,}|\bAIza[0-9A-Za-z_-]{35}\b")),
+)
+_REVIEW_RULES = (
+    ("output", re.compile(
+        r"^\s*(print\s*\(|println!\s*\(|eprintln!\s*\(|fmt\.Print(ln|f)?\s*\(|"
+        r"System\.(out|err)\.print|puts\s|p\s+\w|echo\s+['\"]?DEBUG)")),
+    ("suppression", re.compile(
+        r"eslint-disable|@ts-ignore|@ts-nocheck|@ts-expect-error|#\s*noqa|"
+        r"#\s*type:\s*ignore|#\[allow\(|//\s*nolint|rubocop:disable|"
+        r"@SuppressWarnings|pylint:\s*disable")),
+    ("skipped-test", re.compile(
+        r"\b(describe|it|test)\.skip\s*\(|\b(xit|xdescribe|xtest)\s*\(|"
+        r"@pytest\.mark\.(skip|xfail)|@unittest\.skip|@Ignore\b|@Disabled\b|"
+        r"t\.Skip\s*\(")),
+    ("secret-name", re.compile(
+        r"(?i)\b(pass(word|wd)?|secret|api[_-]?key|auth[_-]?token|access[_-]?token|"
+        r"private[_-]?key)\b\s*[:=]\s*['\"][^'\"\s${}<>]{8,}['\"]")),
+)
+_SLASH_COMMENT = re.compile(r"^\s*(//|/\*|\*/|\*\s)")
+_HASH_COMMENT = re.compile(r"^\s*#")
+_DASH_COMMENT = re.compile(r"^\s*--\s")
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def _comment_only(path: str, line: str) -> bool:
+    suffix = Path(path).suffix.lower()
+    if suffix not in _CODE_SUFFIXES or _FUNCTIONAL_COMMENT.search(line):
+        return False
+    if suffix in _HASH_COMMENT_SUFFIXES:
+        return bool(_HASH_COMMENT.match(line))
+    if suffix == ".sql" or suffix == ".lua":
+        return bool(_DASH_COMMENT.match(line))
+    return bool(_SLASH_COMMENT.match(line))
+
+
+def _scan_line(path: str, line: str) -> list:
+    """[(tier, category)] for one added line."""
+    found = [("BLOCK", cat) for cat, rx in _BLOCK_RULES if rx.search(line)]
+    found += [("REVIEW", cat) for cat, rx in _REVIEW_RULES if rx.search(line)]
+    if _comment_only(path, line) and not any(c == "note" for _, c in found):
+        found.append(("REVIEW", "comment"))
+    return found
+
+
+def _added_lines(diff_text: str):
+    """Yield (path, line_no, text) for every added line of a unified diff."""
+    path, line_no = None, 0
+    for raw in diff_text.splitlines():
+        if raw.startswith("+++ "):
+            target = raw[4:].split("\t")[0].strip()
+            path = None if target == "/dev/null" else re.sub(r"^[ab]/", "", target)
+            continue
+        if raw.startswith("--- "):
+            continue
+        m = _HUNK.match(raw)
+        if m:
+            line_no = int(m.group(1))
+            continue
+        if path is None:
+            continue
+        if raw.startswith("+"):
+            yield path, line_no, raw[1:]
+            line_no += 1
+        elif raw.startswith(" "):
+            line_no += 1
+
+
+def _test_deliverables(plan_path) -> set:
+    """Paths the plan names under `## Test deliverables` (backticked or bare)."""
+    if not plan_path:
+        return set()
+    try:
+        text = _read_text(Path(plan_path).expanduser())
+    except (OSError, UnicodeDecodeError):
+        return set()
+    m = re.search(r"^## Test deliverables\s*\n(.*?)(?=^## |\Z)", text,
+                  re.MULTILINE | re.DOTALL)
+    if not m:
+        return set()
+    return {tok.strip("`*,.;:()[]\"'").lstrip("./")
+            for tok in re.findall(r"[`\w./\-\[\]()@+]+", m.group(1))
+            if "/" in tok or "." in tok}
+
+
+def _read_arg(value) -> str:
+    if value == "-":
+        return sys.stdin.read()
+    return Path(value).expanduser().read_text(encoding="utf-8", errors="replace")
+
+
+def cmd_sweep_scan(args: argparse.Namespace) -> int:
+    if not args.diff and not args.files_from:
+        _err("sweep-scan needs --diff and/or --files-from")
+        return 2
+    if args.diff == "-" and args.files_from == "-":
+        _err("only one of --diff / --files-from may read stdin")
+        return 2
+
+    findings = []            # (tier, category, path, line_no, text)
+    files_seen = set()
+    try:
+        if args.diff:
+            for path, line_no, text in _added_lines(_read_arg(args.diff)):
+                files_seen.add(path)
+                for tier, cat in _scan_line(path, text):
+                    findings.append((tier, cat, path, line_no, text))
+        new_files = []
+        if args.files_from:
+            new_files = [ln.strip() for ln in _read_arg(args.files_from).splitlines()
+                         if ln.strip()]
+    except OSError as exc:
+        _err(f"sweep-scan: cannot read input: {exc}")
+        return 2
+
+    keep = _test_deliverables(args.plan)
+    for rel in new_files:
+        files_seen.add(rel)
+        norm = rel.lstrip("./")
+        if _SCRATCH_NAME.search(norm):
+            findings.append(("BLOCK", "scratch-file", rel, 0, "scratch or backup artifact"))
+            continue
+        if _SCAFFOLD_PATH.search(norm) and norm not in keep:
+            findings.append(("BLOCK", "scaffolding", rel, 0,
+                             "generated test/mock/fixture not named under "
+                             "'## Test deliverables' — delete it (Phase 5a)"))
+        fpath = Path(rel)
+        try:
+            if not fpath.is_file() or fpath.stat().st_size > 2_000_000:
+                continue
+            content = fpath.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for i, text in enumerate(content.splitlines(), 1):
+            for tier, cat in _scan_line(rel, text):
+                findings.append((tier, cat, rel, i, text))
+
+    blocking = sum(1 for f in findings if f[0] == "BLOCK")
+    for tier, cat, path, line_no, text in sorted(findings, key=lambda f: (f[0], f[2], f[3])):
+        where = f"{path}:{line_no}" if line_no else path
+        shown = "[redacted]" if cat in ("secret", "secret-name") else text.strip()[:140]
+        print(f"{tier} {cat} {where}: {shown}")
+    print(f"sweep-scan: {blocking} blocking, {len(findings) - blocking} to review, "
+          f"{len(files_seen)} file(s) scanned")
+    return 1 if blocking else 0
+
+
+# ---------------------------------------------------------------------------
 # `signal` — machine-readable pipeline stage marker
 # ---------------------------------------------------------------------------
 #
@@ -282,6 +538,7 @@ SIGNAL_SCHEMA = 1
 SIGNAL_DIRNAME = ".signals"
 SIGNAL_SKILL = "code-validation"
 SIGNAL_STAGE = "validate"
+UPSTREAM_STAGE = "execute"
 
 
 def cmd_signal(args: argparse.Namespace) -> int:
@@ -351,12 +608,33 @@ def build_parser() -> argparse.ArgumentParser:
                         help="auto-discover the single plan in <repo-root>/.plan")
     sp.set_defaults(func=cmd_default_plan)
 
+    # repo-root
+    sp = sub.add_parser("repo-root",
+                        help="print the repo root that contains the plan "
+                             "(filesystem walk, no git)")
+    sp.add_argument("--plan", required=True, help="path to the plan .md file")
+    sp.set_defaults(func=cmd_repo_root)
+
     # close-out
     sp = sub.add_parser("close-out",
                         help="delete the plan file and print the LAW 6 announcement")
     sp.add_argument("--plan", required=True,
                     help="absolute path to the plan .md file (the PLAN_ABS from plan-check)")
     sp.set_defaults(func=cmd_close_out)
+
+    # sweep-scan
+    sp = sub.add_parser("sweep-scan",
+                        help="scan the change's added lines and new files for "
+                             "production debris (exit 1 on blocking findings)")
+    sp.add_argument("--diff", default=None,
+                    help="unified diff of the change (file path, or - for stdin)")
+    sp.add_argument("--files-from", default=None,
+                    help="newline-separated list of NEW files to scan in full "
+                         "(file path, or - for stdin)")
+    sp.add_argument("--plan", default=None,
+                    help="the plan .md — its '## Test deliverables' paths are "
+                         "exempt from the scaffolding rule")
+    sp.set_defaults(func=cmd_sweep_scan)
 
     # signal
     sp = sub.add_parser("signal",

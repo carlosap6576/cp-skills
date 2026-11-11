@@ -62,7 +62,7 @@ def _err(msg: str) -> None:
 # printed the model's answer. The rewrite now runs in the NATIVE model that is
 # already executing the skill: this subcommand only does the deterministic,
 # testable part (frontmatter strip + placeholder substitution) and prints the
-# ready-to-follow prompt. SKILL.md Step 6 reads it and produces enhanced.txt
+# ready-to-follow prompt. SKILL.md Step 3 reads it and produces enhanced.txt
 # itself — same prompt contract, zero external dependencies.
 
 def cmd_enhance_prompt(args: argparse.Namespace) -> int:
@@ -251,42 +251,43 @@ def cmd_plan_path(args: argparse.Namespace) -> int:
 #
 # The router maps the (enhanced) instruction text to a lens set and a
 # recommended follow-up skill via a keyword-signal table — no LLM, no
-# randomness, same input always yields the same output. Step 8 of SKILL.md
+# randomness, same input always yields the same output. Step 5 of SKILL.md
 # keeps model judgment but only as a bounded add/drop on top of this floor.
 #
 # Invariants (enforced by selftest RoutingTableConsistencyTests):
 #   - LENS_PRIORITY, LENS_SKILL and SIGNALS share the SAME set of lens ids.
-#   - every LENS_SKILL value is a gstack skill name that appears in the
+#   - every non-None LENS_SKILL value is a skill name that appears in the
 #     "Known follow-up skills" table in prompts/expert-lenses.md.
 
 LENS_PRIORITY = ["investigate", "security", "eng", "data", "api", "design",
                  "devex", "ai", "qa", "perf", "reuse", "ops", "docs", "product",
                  "ios"]
 
-# Lens → the gstack skill to recommend as the plan-tier follow-up. Several
-# lenses share `plan-eng-review` on purpose: gstack's plan-tier reviewers are
-# eng / design / ceo / devex (+ cso, qa, investigate, docs-refresh), and the
-# eng manager review is the right reader for data, API, AI, ops, perf and iOS
-# plans, and for reuse (gstack's shared-code rubric lives in its code-quality
-# section). Post-implementation experts (/review --data-migration, /cso, /qa,
-# /benchmark, /deslop-shared-libs, /canary …) are named inside the plan's "Experts & Tooling"
-# section by the lens content, not here.
+# Lens → the gstack skill that reviews the PLAN before it is executed, or None
+# when no plan-tier reviewer fits. gstack 1.98 retired the standalone
+# /plan-eng-review (its methodology is /autoplan's eng phase) and /investigate
+# (a bug fix needs a failing test and a root-cause fix, not a review), so the
+# engineering-shaped lenses share `autoplan`, and `investigate` and `qa` — whose
+# experts act on written code — map to None. Post-implementation experts
+# (/review --data-migration, /cso, /qa, /benchmark, /deslop-shared-libs,
+# /canary …) are named inside the plan's "Experts & Tooling" section by the
+# lens content, not here.
 LENS_SKILL = {
     "design": "plan-design-review",
-    "eng": "plan-eng-review",
-    "security": "cso",
-    "qa": "qa",
+    "eng": "autoplan",
+    "security": "autoplan",
+    "qa": None,
     "devex": "plan-devex-review",
     "product": "plan-ceo-review",
-    "investigate": "investigate",
+    "investigate": None,
     "docs": "docs-refresh",
-    "ios": "plan-eng-review",
-    "perf": "plan-eng-review",
-    "data": "plan-eng-review",
-    "api": "plan-eng-review",
-    "ai": "plan-eng-review",
-    "ops": "plan-eng-review",
-    "reuse": "plan-eng-review",
+    "ios": "autoplan",
+    "perf": "autoplan",
+    "data": "autoplan",
+    "api": "autoplan",
+    "ai": "autoplan",
+    "ops": "autoplan",
+    "reuse": "autoplan",
 }
 
 SIGNALS = {
@@ -389,15 +390,15 @@ def _match_signal(text: str, signal: str) -> bool:
 
 
 def recommend_skill(lenses: list[str]) -> str | None:
-    """The follow-up skill for a lens set. `autoplan` (the CEO → Design → DX →
-    Eng combo review) is recommended only when MAX_LENSES lenses were selected
-    AND they span at least two distinct review families (distinct LENS_SKILL
-    values) — three lenses that all read best under `plan-eng-review`
-    (eng + data + api, say) still get the single eng review, because autoplan
-    would spend a CEO and a design pass on a backend-only plan."""
-    if not lenses:
+    """The plan-tier reviewer for a lens set, or None when none fits.
+
+    The leading lens decides: a lens with no plan reviewer (`investigate`,
+    `qa`) means the plan goes straight to execution. Otherwise `autoplan`
+    (CEO → Design → DX → Eng) when MAX_LENSES lenses span at least two review
+    families, else the leading lens's own reviewer."""
+    if not lenses or LENS_SKILL[lenses[0]] is None:
         return None
-    families = {LENS_SKILL[lens] for lens in lenses}
+    families = {LENS_SKILL[lens] for lens in lenses if LENS_SKILL[lens]}
     if len(lenses) == MAX_LENSES and len(families) >= 2:
         return "autoplan"
     return LENS_SKILL[lenses[0]]
@@ -423,9 +424,8 @@ def route_lenses(text: str) -> dict:
           "lenses": [lens, ...],            # <= MAX_LENSES, priority-ordered
           "scores": {lens: int, ...},       # distinct matched signal count
           "recommended_skill": str | None,  # recommend_skill(lenses):
-                                            #   LENS_SKILL[lenses[0]], or
-                                            #   "autoplan" when 3 lenses span
-                                            #   2+ review families, or None
+                                            #   the plan-tier reviewer, or
+                                            #   None when none fits
           "matched": {lens: [signal, ...]}, # the distinct matched signals
           "clarify": bool,                  # brief carries Open questions /
                                             #   a NOTE: — not plannable as is

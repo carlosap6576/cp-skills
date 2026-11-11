@@ -253,10 +253,10 @@ class PlanCheckTests(unittest.TestCase):
 
 class DefaultPlanTests(unittest.TestCase):
     """Auto-discovery for an omitted -p: exactly one *.md in <repo-root>/.plan
-    resolves with zero prompts; missing/empty/ambiguous all exit 2 so the
-    SKILL.md falls back to its path question. A regression that guesses here
-    would validate the wrong plan; one that exits 2 on a single plan would
-    resurrect the needless confirmation prompt."""
+    resolves with zero prompts, and so does the one plan the pipeline signals
+    single out; missing/empty/ambiguous all exit 2, which SKILL.md turns into
+    a STOP with a failed signal (never a question). A regression that guesses
+    here would validate the wrong plan."""
 
     def _in_tmp(self, build, cwd_rel="."):
         """Create a temp tree via build(root), chdir to root/cwd_rel, run
@@ -319,6 +319,78 @@ class DefaultPlanTests(unittest.TestCase):
         self.assertIn("2 plans", out.stderr)
         self.assertIn("a-plan.md", out.stderr)
         self.assertIn("b-plan.md", out.stderr)
+
+    def _signal(self, root, stem, stage, status="success", at="2026-11-11T10:00:00+00:00"):
+        import json
+        d = root / ".plan" / ".signals"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{stem}.{stage}.json").write_text(
+            json.dumps({"status": status, "written_at": at}), encoding="utf-8")
+
+    def _two_plans(self, root):
+        (root / ".git").mkdir()
+        d = root / ".plan"
+        d.mkdir()
+        (d / "a-plan.md").write_text("### Step 1\n", encoding="utf-8")
+        (d / "b-plan.md").write_text("### Step 1\n", encoding="utf-8")
+
+    def test_signals_single_out_the_one_pending_plan(self):
+        def build(root):
+            self._two_plans(root)
+            self._signal(root, "a-plan", "execute")
+            self._signal(root, "a-plan", "validate", at="2026-11-11T11:00:00+00:00")
+            self._signal(root, "b-plan", "execute")
+        out, _ = self._in_tmp(build)
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertTrue(out.stdout.strip().endswith("b-plan.md"))
+        self.assertIn("NOTE:", out.stderr)
+
+    def test_a_newer_upstream_signal_makes_the_plan_pending_again(self):
+        def build(root):
+            self._two_plans(root)
+            self._signal(root, "a-plan", "validate", at="2026-11-10T09:00:00+00:00")
+            self._signal(root, "a-plan", "execute", at="2026-11-11T09:00:00+00:00")
+        out, _ = self._in_tmp(build)
+        self.assertEqual(out.code, 0, out.stderr)
+        self.assertTrue(out.stdout.strip().endswith("a-plan.md"))
+
+    def test_two_pending_plans_still_exit_2(self):
+        def build(root):
+            self._two_plans(root)
+            self._signal(root, "a-plan", "execute")
+            self._signal(root, "b-plan", "execute")
+        out, _ = self._in_tmp(build)
+        self.assertEqual(out.code, 2)
+        self.assertIn("2 plans", out.stderr)
+
+    def test_failed_or_malformed_signals_never_select_a_plan(self):
+        def build(root):
+            self._two_plans(root)
+            self._signal(root, "a-plan", "execute", status="failed")
+            (root / ".plan" / ".signals" / "b-plan.execute.json").write_text(
+                "not json", encoding="utf-8")
+        out, _ = self._in_tmp(build)
+        self.assertEqual(out.code, 2)
+
+    def test_repo_root_walks_up_from_the_plan_without_git(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".git").mkdir()
+            (root / "docs" / "plans").mkdir(parents=True)
+            plan = root / "docs" / "plans" / "p.md"
+            plan.write_text("### Step 1\n", encoding="utf-8")
+            out = io_capture(code_validation.main, ["repo-root", "--plan", str(plan)])
+            self.assertEqual(out.code, 0, out.stderr)
+            self.assertEqual(out.stdout.strip(), str(root))
+
+    def test_repo_root_without_git_is_the_parent_of_dot_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".plan").mkdir()
+            plan = root / ".plan" / "p.md"
+            plan.write_text("### Step 1\n", encoding="utf-8")
+            out = io_capture(code_validation.main, ["repo-root", "--plan", str(plan)])
+            self.assertEqual(out.stdout.strip(), str(root))
 
     def test_skill_md_pins_the_zero_prompt_contract(self):
         raw = (SCRIPTS_DIR.parent / "SKILL.md").read_text(encoding="utf-8")
@@ -668,6 +740,92 @@ class CloseOutTests(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertTrue(sibling.exists(), "sibling plans must survive")
             self.assertTrue(plan_dir.is_dir(), "the .plan folder must survive")
+
+
+class SweepScanTests(unittest.TestCase):
+    """`sweep-scan` turns the checkable half of the Phase 5 sweep into a tool
+    result: BLOCK findings exit 1, REVIEW findings are listed and exit 0."""
+
+    DIFF_HEAD = "--- a/{p}\n+++ b/{p}\n@@ -1,0 +5,{n} @@\n"
+
+    def _scan(self, path, added, new_files=None, plan=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            diff = root / "c.diff"
+            diff.write_text(self.DIFF_HEAD.format(p=path, n=len(added))
+                            + "".join(f"+{line}\n" for line in added),
+                            encoding="utf-8")
+            argv = ["sweep-scan", "--diff", str(diff)]
+            if new_files is not None:
+                lst = root / "new.txt"
+                lst.write_text("\n".join(new_files) + "\n", encoding="utf-8")
+                argv += ["--files-from", str(lst)]
+            if plan is not None:
+                pl = root / "plan.md"
+                pl.write_text(plan, encoding="utf-8")
+                argv += ["--plan", str(pl)]
+            return io_capture(code_validation.main, argv)
+
+    def test_clean_change_exits_zero(self):
+        out = self._scan("src/a.py", ["def total(items):", "    return sum(items)"])
+        self.assertEqual(out.code, 0, out.stdout)
+        self.assertIn("0 blocking, 0 to review", out.stdout)
+
+    def test_blocking_debris_exits_one_with_file_and_line(self):
+        out = self._scan("src/a.ts", [
+            "console.log(x);", "it.only('a', () => {});", "// TODO: later",
+            "<<<<<<< HEAD", "Co-Authored-By: Claude <x@y>", "debugger;"])
+        self.assertEqual(out.code, 1)
+        for marker in ("BLOCK debug src/a.ts:5", "BLOCK focused-test src/a.ts:6",
+                       "BLOCK note src/a.ts:7", "BLOCK conflict-marker src/a.ts:8",
+                       "BLOCK ai-note src/a.ts:9", "BLOCK debug src/a.ts:10"):
+            self.assertIn(marker, out.stdout)
+
+    def test_secrets_block_and_are_never_echoed(self):
+        key = "AKIA" + "ABCDEFGHIJKLMNOP"
+        out = self._scan("cfg.py", [f'KEY = "{key}"'])
+        self.assertEqual(out.code, 1)
+        self.assertIn("BLOCK secret cfg.py:5: [redacted]", out.stdout)
+        self.assertNotIn(key, out.stdout)
+
+    def test_review_tier_lists_but_does_not_fail(self):
+        out = self._scan("src/a.py", [
+            "# explains the next line", "print(total)", "x = 1  # noqa: E501",
+            "#!/usr/bin/env python3", "# type: ignore"])
+        self.assertEqual(out.code, 0, out.stdout)
+        self.assertIn("REVIEW comment src/a.py:5", out.stdout)
+        self.assertIn("REVIEW output src/a.py:6", out.stdout)
+        self.assertIn("REVIEW suppression src/a.py:7", out.stdout)
+        self.assertNotIn("src/a.py:8", out.stdout)
+        self.assertNotIn("comment src/a.py:9", out.stdout)
+
+    def test_markdown_headings_are_not_comments(self):
+        out = self._scan("README.md", ["# Title", "-- not sql"])
+        self.assertIn("0 blocking, 0 to review", out.stdout)
+
+    def test_generated_scaffolding_blocks_unless_the_plan_names_it(self):
+        plan = "## Test deliverables\n- `tests/test_keep.py`\n\n## Risks\nNone.\n"
+        out = self._scan("src/a.py", ["x = 1"],
+                         new_files=["tests/test_keep.py", "tests/test_drop.py",
+                                    "src/__mocks__/api.ts", "notes.bak"],
+                         plan=plan)
+        self.assertEqual(out.code, 1)
+        self.assertIn("BLOCK scaffolding tests/test_drop.py", out.stdout)
+        self.assertIn("BLOCK scaffolding src/__mocks__/api.ts", out.stdout)
+        self.assertIn("BLOCK scratch-file notes.bak", out.stdout)
+        self.assertNotIn("test_keep.py", out.stdout)
+
+    def test_removed_and_context_lines_are_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            diff = Path(tmp) / "c.diff"
+            diff.write_text("--- a/a.js\n+++ b/a.js\n@@ -1,2 +1,2 @@\n"
+                            "-console.log(1);\n console.log(2);\n+ok();\n",
+                            encoding="utf-8")
+            out = io_capture(code_validation.main, ["sweep-scan", "--diff", str(diff)])
+        self.assertEqual(out.code, 0, out.stdout)
+
+    def test_no_input_is_a_usage_error(self):
+        self.assertEqual(io_capture(code_validation.main, ["sweep-scan"]).code, 2)
 
 
 class SignalTests(unittest.TestCase):

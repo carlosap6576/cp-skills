@@ -4,8 +4,10 @@ code_execute.py — stdlib-only helper for the /code-execute skill.
 
 Subcommands:
   plan-check   Validate a plan file is an executable plan (.md with steps).
-  default-plan Resolve the single plan in <repo-root>/.plan when -p was omitted
-               (STRICT: missing folder, empty folder, or >1 plan all exit 2).
+  default-plan Resolve the plan in <repo-root>/.plan when -p was omitted
+               (STRICT: one plan, or the one the pipeline signals single out;
+               anything else exits 2).
+  repo-root    Print the repo root containing the plan (filesystem walk, no git).
   render       Substitute the {{PATH}} placeholder in the execute-prompt template.
   signal       Write the machine-readable pipeline stage signal
                (.plan/.signals/<plan-stem>.execute.json) for automation.
@@ -103,7 +105,10 @@ def cmd_plan_check(args: argparse.Namespace) -> int:
 #   exactly one *.md in .plan  → print its absolute path, exit 0
 #   .plan missing              → exit 2 ("provide -p")
 #   .plan has no *.md files    → exit 2 ("provide -p")
-#   .plan has 2+ *.md files    → exit 2 ("provide -p", candidates listed)
+#   .plan has 2+ *.md files    → the ONE plan whose pipeline signals show it
+#                                waiting for this stage (code-plan succeeded,
+#                                execute has not since) → exit 0; otherwise
+#                                exit 2 ("provide -p", candidates listed)
 
 DEFAULT_PLAN_DIRNAME = ".plan"
 
@@ -117,6 +122,34 @@ def _find_repo_root(start: Path) -> Path:
         if (candidate / ".git").exists():
             return candidate
     return cur
+
+
+def _signal_time(signal_dir: Path, stem: str, stage: str):
+    """`written_at` of a SUCCESS signal for (stem, stage), else None. A
+    missing, unreadable, malformed or failed signal is simply "no signal"."""
+    try:
+        data = json.loads((signal_dir / f"{stem}.{stage}.json")
+                          .read_text(encoding="utf-8"))
+        if data.get("status") != "success":
+            return None
+        return datetime.fromisoformat(data["written_at"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def _pending_plans(plans: list, signal_dir: Path) -> list:
+    """Plans the pipeline says are waiting for THIS stage: the upstream stage
+    succeeded and this stage has not succeeded since. Evidence, not a guess —
+    it reads only the signal files the sibling skills wrote."""
+    pending = []
+    for plan in plans:
+        upstream = _signal_time(signal_dir, plan.stem, UPSTREAM_STAGE)
+        if upstream is None:
+            continue
+        done = _signal_time(signal_dir, plan.stem, SIGNAL_STAGE)
+        if done is None or done < upstream:
+            pending.append(plan)
+    return pending
 
 
 def cmd_default_plan(_args: argparse.Namespace) -> int:
@@ -136,12 +169,38 @@ def cmd_default_plan(_args: argparse.Namespace) -> int:
         return 2
 
     if len(plans) > 1:
-        _err(f"{plan_dir} has {len(plans)} plans — pass -p to choose one:")
+        pending = _pending_plans(plans, plan_dir / SIGNAL_DIRNAME)
+        if len(pending) == 1:
+            _err(f"NOTE: {len(plans)} plans in {plan_dir}; the pipeline signals "
+                 f"show exactly one waiting for the {SIGNAL_STAGE} stage — "
+                 f"selected {pending[0].name}")
+            print(str(pending[0].resolve()))
+            return 0
+        _err(f"{plan_dir} has {len(plans)} plans and the pipeline signals do "
+             f"not single one out — pass -p to choose one:")
         for p in plans:
             _err(f"  -p {p}")
         return 2
 
     print(str(plans[0].resolve()))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# `repo-root` — the directory the plan's repo-relative paths resolve against
+# ---------------------------------------------------------------------------
+#
+# Pure filesystem walk from the plan file's own directory (never the git
+# binary), so the skill resolves its working directory without running git.
+
+def cmd_repo_root(args: argparse.Namespace) -> int:
+    plan = Path(args.plan).expanduser().resolve()
+    start = plan.parent
+    root = _find_repo_root(start)
+    # A plan saved in <root>/.plan with no .git above it still belongs to <root>.
+    if root == start and start.name == DEFAULT_PLAN_DIRNAME:
+        root = start.parent
+    print(str(root))
     return 0
 
 
@@ -199,6 +258,7 @@ SIGNAL_SCHEMA = 1
 SIGNAL_DIRNAME = ".signals"
 SIGNAL_SKILL = "code-execute"
 SIGNAL_STAGE = "execute"
+UPSTREAM_STAGE = "plan"
 
 
 def cmd_signal(args: argparse.Namespace) -> int:
@@ -261,6 +321,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="resolve the single plan in <repo-root>/.plan "
                              "(exit 2 unless exactly one *.md exists)")
     sp.set_defaults(func=cmd_default_plan)
+
+    # repo-root
+    sp = sub.add_parser("repo-root",
+                        help="print the repo root that contains the plan "
+                             "(filesystem walk, no git)")
+    sp.add_argument("--plan", required=True, help="path to the plan .md file")
+    sp.set_defaults(func=cmd_repo_root)
 
     # render
     sp = sub.add_parser("render", help="substitute {{PATH}} in the execute-prompt template")
